@@ -10,7 +10,7 @@ extern int column;
 extern Texture tmountain;
 extern Texture tcrown;
 extern Texture tcity;
-extern Color Cplayer1;
+extern Color playercolor[8];
 
 
 //传入的x与y应是实际坐标减去1
@@ -21,22 +21,21 @@ void DrawL1Block(Block** mapL1, int x, int y,int player) {
 		if (tx >= 0 && tx < line && ty >= 0 && ty < column) if (mapL1[tx][ty].owner == player) islit = true;
 	}
 	if (islit) {
-		//printf("%d %d is lit\n", x + 1, y + 1);
 		switch (mapL1[x][y].type) {
 		case MOUNTAIN:
 			DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, LIT_MOUNTAIN);
 			DrawTexture(tmountain, -65 * line + 130 * x + 15, -65 * column + 130 * y + 15, WHITE);
 			break;
 		case CROWN:
-			DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, Cplayer1);
+			DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, playercolor[mapL1[x][y].owner-1]);
 			DrawTexture(tcrown, -65 * line + 130 * x + 15, -65 * column + 130 * y + 15, WHITE);
 			break;
 		case PLAIN:
-			if (mapL1[x][y].owner == player) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, Cplayer1);
+			if (mapL1[x][y].owner > 0) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, playercolor[mapL1[x][y].owner - 1]);
 			else DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, LIT_PLAIN);
 			break;
 		case CITY:
-			if (mapL1[x][y].owner == player) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, Cplayer1);
+			if (mapL1[x][y].owner > 0) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, playercolor[mapL1[x][y].owner - 1]);
 			else DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, LIT_CITY);
 			DrawTexture(tcity, -65 * line + 130 * x + 15, -65 * column + 130 * y + 15, WHITE);
 			break;

@@ -2,7 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include "../basicmap/generals.h"
+#include <generals.h>
 #include <threads.h>
 
 int fps = 60;
@@ -12,8 +12,8 @@ Camera2D camera = { 0 };
 extern bool isinmap(Vector2 mouseInWorld);
 extern int chosenColumn(float mouse_Y);
 extern int chosenLine(float mouse_X);
-extern void drawhighlight(int mapx, int mapy, Color color, int islit);
-extern void DrawL1Block(Block** mapL1, int x, int y, int player);
+extern void drawhighlight(int mapx, int mapy,Color color,int islit);
+extern void DrawL1Block(Block** mapL1, int x, int y,int player);
 int MoveOneStep();
 void DrawArrow(Move move);
 void DrawArrowWithShader(Texture arrow, int x, int y);
@@ -27,7 +27,7 @@ int send_to_server(void* arg);
 int Control(void* arg);
 void GetRank();
 char isapplied = 0;
-char messageType, currentCMD;
+char messageType,currentCMD;
 bool NeedToUploadData = true;
 bool NeedToRefreshPage = true;
 cnd_t cond;
@@ -43,7 +43,7 @@ int column;
 Move movelist[300] = { 0 };
 int movecount = 0;
 Block** mapL1;
-thrd_t recv_fd, send_fd, ctrl_fd;
+thrd_t recv_fd,send_fd,ctrl_fd;
 int roundn = 1;
 int playernum;//从1开始
 Block* mapbuffer;
@@ -71,6 +71,11 @@ int main(void)
 
 	Renderer();
 
+	NeedToUploadData = true;
+	currentCMD = CLIENT_EXIT;
+	messageType = CLIENT_CMD;
+	cnd_signal(&cond);
+	Sleep(50);
 	// 请求线程优雅退出
 	running = false;
 	cnd_signal(&cond); // 唤醒可能等待的线程
@@ -152,8 +157,8 @@ int Renderer() {
 	{
 		width = GetScreenWidth();
 		height = GetScreenHeight();
-		if (running==0) break; // 响应全局退出
-		if (game_status == START) {
+		if (!running) break; // 响应全局退出
+		if (game_status == START){
 			mtx_lock(&mutex);
 			memset(&statisticData, 0, sizeof(StatisticData));
 			float wheelDelta = GetMouseWheelMove();
@@ -288,16 +293,16 @@ int Renderer() {
 			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { tryconnect = 1; cnd_signal(&cond); }
 			BeginDrawing();
 			ClearBackground(background);
-			DrawTextAtCenter("Disconnected", width / 2, height / 2 - 60, 35, WHITE);
+			DrawTextAtCenter("Disconnected", width / 2, height / 2-60, 35, WHITE);
 			EndDrawing();
 		}
 		if (game_status == WAITING) {
 			GetRank();
 			BeginDrawing();
 			ClearBackground(background);
-			DrawTextAtCenter("Connected", width / 2, height / 2 - 60, 35, WHITE);
+			DrawTextAtCenter("Connected", width / 2, height / 2-60, 35, WHITE);
 			Rectangle readyButton;
-			if (gameReady == 0) readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 30, 35, BLACK, WHITE, GeneralsGreen);
+			if (gameReady == 0) readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum,setupdata.totalnum), width / 2, height / 2 + 30, 35, BLACK, WHITE, GeneralsGreen);
 			else readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 30, 35, WHITE, GeneralsGreen, BLACK);
 			if (CheckCollisionPointRec(GetMousePosition(), readyButton)) {
 				if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -320,10 +325,11 @@ int Renderer() {
 		}
 		if (game_status == LOSE) {
 			memset(&statisticData, 0, sizeof(StatisticData));
+			mtx_lock(&mutex);
 			BeginDrawing();
 			ClearBackground(background);
 			BeginMode2D(camera);
-
+			
 			//layer0:basic map(unlit)
 			DrawRectangleRec(map_layer0, map_unlit);
 
@@ -342,7 +348,7 @@ int Renderer() {
 			DrawRectangle(20, 20, 270, 70, WHITE);
 			DrawText(TextFormat("Round %d", roundn), 35, 35, 35, BLACK);
 			DrawCountTable();
-			DrawRectangle(width / 2 - 250, height / 2 - 175, 500, 350, WHITE);
+			DrawRectangle(width/2 - 250, height/2 - 175, 500, 350, WHITE);
 			DrawTextAtCenter("YOU LOSE!", width / 2, height / 2 - 50, 50, BLACK);
 			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
 			mtx_unlock(&mutex);
@@ -371,12 +377,13 @@ int recv_from_server(void* arg) {
 	SOCKET sock = (SOCKET)arg;
 	while (running) {
 		char msgType;
-		if (recv(sock, &msgType, 1, MSG_WAITALL) <= 0) {running=false; break; }
+		if (recv(sock, &msgType, 1, MSG_WAITALL) <= 0) { game_status = DISCONNECTED; }
 		if (msgType == MAP_DATA)
 		{
 			//printf("trying to download map...\n");
 			recv(sock, mapbuffer, line * column * sizeof(Block), MSG_WAITALL);
-			char isappliedtmp, roundntmp;
+			char isappliedtmp;
+			int roundntmp;
 			recv(sock, &isappliedtmp, sizeof(char), MSG_WAITALL);
 			recv(sock, &roundntmp, sizeof(int), MSG_WAITALL);
 			mtx_lock(&mutex);
@@ -444,7 +451,7 @@ int send_to_server(void* arg) {
 		while (NeedToUploadData == false && running) {
 			cnd_wait(&cond, &mutex);
 		}
-		if (running==false) { mtx_unlock(&mutex); break; }
+		if (!running) { mtx_unlock(&mutex); break; }
 		NeedToUploadData = false;
 		printf("try to send %d\n", (int)messageType);
 		if (messageType == UPLOAD_MOVE && movecount > 0) {
@@ -468,8 +475,7 @@ int send_to_server(void* arg) {
 			mtx_unlock(&mutex);
 			send(sock, &messageType, 1, 0);
 			send(sock, &currentCMD, 1, 0);
-		}
-		else 	mtx_unlock(&mutex);
+		}else 	mtx_unlock(&mutex);
 
 	}
 	return 0;
@@ -482,19 +488,19 @@ int Control(void* arg) {
 	inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
 	while (running) {
 		mtx_lock(&mutex);
-		while (tryconnect == 0 && atomic_load(&running)) cnd_wait(&cond, &mutex);
+		while (tryconnect == 0 && running) cnd_wait(&cond, &mutex);
 		mtx_unlock(&mutex);
-		if (!atomic_load(&running)) break;
+		if (!running) break;
 		if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) >= 0) break;
 	}
-	if (!atomic_load(&running)) return 0;
+	if (!running) return 0;
 	game_status = WAITING;
 	thrd_create(&send_fd, send_to_server, (void*)sock);
 	thrd_create(&recv_fd, recv_from_server, (void*)sock);
 	return 0;
 }
 
-void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color) {
+void DrawTextAtCenter(char* text,int x,int y,int fontsize,Color color) {
 	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
 	DrawTextEx(font, text, (Vector2) { (int)(x - textsize.x / 2), (int)(y - textsize.y / 2) }, fontsize, TEXT_SPACING, color);
 }
@@ -512,9 +518,9 @@ void DrawCountTable() {
 	DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH, 0, TABLE_ARMY_WIDTH, TABLE_HEIGHT, "Army", TABLE_FONTSIZE, BLACK, WHITE, BLACK);
 	DrawFilledRectangle(width - TABLE_LAND_WIDTH, 0, TABLE_LAND_WIDTH, TABLE_HEIGHT, "Land", TABLE_FONTSIZE, BLACK, WHITE, BLACK);
 	for (int i = 1; i <= setupdata.totalnum; i++) {
-		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH - TABLE_PLAYER_WIDTH, TABLE_HEIGHT * i, TABLE_PLAYER_WIDTH, TABLE_HEIGHT, setupdata.playername[rank[i - 1] - 1], TABLE_FONTSIZE, BLACK, setupdata.playercolor[rank[i - 1] - 1], WHITE);
-		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH, TABLE_HEIGHT * i, TABLE_ARMY_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.army[rank[i - 1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
-		DrawFilledRectangle(width - TABLE_LAND_WIDTH, TABLE_HEIGHT * i, TABLE_LAND_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.land[rank[i - 1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH - TABLE_PLAYER_WIDTH, TABLE_HEIGHT * i, TABLE_PLAYER_WIDTH, TABLE_HEIGHT, setupdata.playername[rank[i-1] - 1], TABLE_FONTSIZE, BLACK, setupdata.playercolor[rank[i-1] - 1], WHITE);
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH, TABLE_HEIGHT * i, TABLE_ARMY_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.army[rank[i-1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH, TABLE_HEIGHT * i, TABLE_LAND_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.land[rank[i-1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
 	}
 }
 void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor) {
@@ -530,7 +536,7 @@ void DrawFilledRectangle(int startx, int starty, int width, int height, char* te
 }
 void GetRank() {
 	for (int i = 0; i < 8; i++) rank[i] = i + 1;
-	for (int i = 0; i < 8; i++) for (int j = i + 1; j < 8; j++) if (statisticData.army[rank[i] - 1] < statisticData.army[rank[j] - 1] || (statisticData.army[rank[i] - 1] == statisticData.army[rank[j] - 1] && statisticData.land[rank[i] - 1] < statisticData.land[rank[j] - 1])) {
+	for (int i = 0; i < 8; i++) for (int j = i + 1; j < 8; j++) if (statisticData.army[rank[i]-1] < statisticData.army[rank[j]-1] || (statisticData.army[rank[i]-1] == statisticData.army[rank[j]-1] && statisticData.land[rank[i]-1] < statisticData.land[rank[j]-1])) {
 		int tmp = rank[i];
 		rank[i] = rank[j];
 		rank[j] = tmp;
