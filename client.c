@@ -219,10 +219,10 @@ int Renderer() {
 					}
 				}
 			}
-			if (IsKeyPressed(KEY_LEFT)) if (chosenblock[0] > 0) { chosenblock[0]--; NeedToRefreshPage = true; }
-			if (IsKeyPressed(KEY_RIGHT)) if (chosenblock[0] < line) { chosenblock[0]++; NeedToRefreshPage = true; }
-			if (IsKeyPressed(KEY_UP)) if (chosenblock[1] > 0) { chosenblock[1]--; NeedToRefreshPage = true; }
-			if (IsKeyPressed(KEY_DOWN)) if (chosenblock[1] < column) { chosenblock[1]++; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) if (chosenblock[0] > 0) { chosenblock[0]--; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) if (chosenblock[0] < line) { chosenblock[0]++; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W)) if (chosenblock[1] > 0) { chosenblock[1]--; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S)) if (chosenblock[1] < column) { chosenblock[1]++; NeedToRefreshPage = true; }
 			if (IsKeyPressed(KEY_Z)) if (movecount > 0) { movecount--; NeedToRefreshPage = true; }
 
 			if (!displayHighLight) {

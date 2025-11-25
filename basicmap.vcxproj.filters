@@ -18,13 +18,13 @@
     <ClCompile Include="client.c">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\map_generator.c">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="KeyBoardInput.c">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="rendererL1.c">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="map_generator.c">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

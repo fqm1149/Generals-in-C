@@ -148,9 +148,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\map_generator.c" />
     <ClCompile Include="KeyBoardInput.c" />
     <ClCompile Include="client.c" />
+    <ClCompile Include="map_generator.c" />
     <ClCompile Include="rendererL1.c" />
   </ItemGroup>
   <ItemGroup>
