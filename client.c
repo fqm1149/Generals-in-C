@@ -2,79 +2,90 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <generals.h>
-#include <pthread.h>
-
-
+#include "../basicmap/generals.h"
+#include <threads.h>
 
 int fps = 60;
 
-extern int** generatemap(int x,int y);
+Rectangle map_layer0;
+Camera2D camera = { 0 };
 extern bool isinmap(Vector2 mouseInWorld);
 extern int chosenColumn(float mouse_Y);
 extern int chosenLine(float mouse_X);
-extern void drawhighlight(int mapx, int mapy,Color color,int islit);
+extern void drawhighlight(int mapx, int mapy, Color color, int islit);
 extern void DrawL1Block(Block** mapL1, int x, int y, int player);
 int MoveOneStep();
 void DrawArrow(Move move);
 void DrawArrowWithShader(Texture arrow, int x, int y);
+void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color);
+Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textcolor, Color button, Color shader);
+void DrawCountTable();
+void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color Fillcolor, Color textcolor);
 int Renderer();
-int MapDownload(SOCKET sock);
-int MoveUpload(SOCKET sock);
+int recv_from_server(void* arg);
+int send_to_server(void* arg);
+int Control(void* arg);
+void GetRank();
 char isapplied = 0;
-bool NeedToUploadMove = true;
+char messageType, currentCMD;
+bool NeedToUploadData = true;
 bool NeedToRefreshPage = true;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-
+cnd_t cond;
+SetupData setupdata;
 Texture tmountain;
 Texture tcity;
 Texture tcrown;
-Color Cplayer1 = { 39,146,255,255 };
+Color playercolor[8];
 Texture arrowup, arrowdown, arrowleft, arrowright;
-pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
-int line = LINE;
-int column = COLUMN;
+mtx_t mutex;
+int line;
+int column;
 Move movelist[300] = { 0 };
 int movecount = 0;
 Block** mapL1;
-pthread_t recv_fd,send_fd;
+thrd_t recv_fd, send_fd, ctrl_fd;
 int roundn = 1;
-int playernum=1;
+int playernum;//从1开始
 Block* mapbuffer;
+char game_status = DISCONNECTED;
+int tryconnect = 1;
+char gameReady = 0;
+StatisticData statisticData;
+int width, height;
+Font font;
+int rank[8];//rank i 表示第i名是谁
+bool running = true;
 
 int main(void)
 {
-	
+	// 初始化互斥与条件变量
+	mtx_init(&mutex, mtx_plain);
+	cnd_init(&cond);
 
+	//初始化WSA
 	WSADATA wsadata;
 	int wsares = WSAStartup(MAKEWORD(2, 2), &wsadata);
 	if (wsares != 0) return 1;
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-	struct sockaddr_in serv_addr;
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(PORT);
-	inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
-	printf("waiting for server to accept...\n");
-	connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-	printf("error:%d\n", WSAGetLastError());
-
-
-
-	mapL1 = malloc(line * sizeof(Block*));
-	for (int i = 0; i < line; i++) {
-		mapL1[i] = malloc(column * sizeof(Block));
-	}
-	mapbuffer = malloc(line * column * sizeof(Block));
-	pthread_create(&recv_fd, NULL, MapDownload, sock);
-	pthread_create(&send_fd, NULL, MoveUpload, sock);
+	thrd_create(&ctrl_fd, Control, (void*)sock);
 
 	Renderer();
 
+	// 请求线程优雅退出
+	running = false;
+	cnd_signal(&cond); // 唤醒可能等待的线程
+
+	// 等待线程结束（如果已创建）
+	thrd_join(recv_fd, NULL);
+	thrd_join(send_fd, NULL);
+	thrd_join(ctrl_fd, NULL);
+
+	// 清理战场
 	for (int i = 0; i < line; i++) free(mapL1[i]);
 	free(mapL1);
-	pthread_cancel(recv_fd);
-	pthread_cancel(send_fd);
-	pthread_mutex_destroy(&mutex);
+	free(mapbuffer);
+	mtx_destroy(&mutex);
+	cnd_destroy(&cond);
 	closesocket(sock);
 	WSACleanup();
 	printf("cleaned\n");
@@ -87,7 +98,7 @@ void DrawArrow(Move move) {
 	int y = -65 * column + 130 * move.starty - 130;
 	if (move.endx == move.startx - 1) DrawArrowWithShader(arrowleft, x, y);
 	if (move.endx == move.startx + 1) DrawArrowWithShader(arrowright, x, y);
-	if (move.endy == move.starty - 1) DrawArrowWithShader(arrowup,  x, y);
+	if (move.endy == move.starty - 1) DrawArrowWithShader(arrowup, x, y);
 	if (move.endy == move.starty + 1) DrawArrowWithShader(arrowdown, x, y);
 }
 void DrawArrowWithShader(Texture arrow, int x, int y) {
@@ -111,17 +122,14 @@ int Renderer() {
 	InitWindow(screenWidth, screenHeight, "Generals_re");
 	SetWindowState(FLAG_WINDOW_RESIZABLE);
 	SetTargetFPS(fps);
-	Camera2D camera = { 0 };
 	camera.target = (Vector2){ 0,0 };
 	camera.rotation = 0.0f;
 	camera.zoom = 0.5f;
-	if (line <= 10 && column <= 10) camera.zoom = 1.0f;
 	camera.offset = (Vector2){ screenWidth / 2,screenHeight / 2 };
 	Color background = { 34,34,34,255 };
 	Color map_unlit = { 57,57,57,255 };
 	Color GeneralsGreen = { 0,128,128,255 };
 	Color selected_WHITE = { 255,255,255,80 };
-	Rectangle map_layer0 = { -line * 65,-column * 65,line * 130,column * 130 };
 	tmountain = LoadTextureFromImage(mountain);
 	tcity = LoadTextureFromImage(LoadImage("city.png"));
 	tcrown = LoadTextureFromImage(crown);
@@ -129,6 +137,7 @@ int Renderer() {
 	arrowdown = LoadTextureFromImage(LoadImage("arrowdown.png"));
 	arrowleft = LoadTextureFromImage(LoadImage("arrowleft.png"));
 	arrowright = LoadTextureFromImage(LoadImage("arrowright.png"));
+	font = GetFontDefault();
 
 	Texture tobstacle = LoadTextureFromImage(obstacle);
 	bool displayHighLight = false;
@@ -141,99 +150,105 @@ int Renderer() {
 	// 主游戏循环
 	while (!WindowShouldClose())    //关闭窗口或者按ESC键时返回true
 	{
-		pthread_mutex_lock(&mutex);
-		float wheelDelta = GetMouseWheelMove();
-		Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), camera);
-		if (wheelDelta != 0) {
-			NeedToRefreshPage = true;
-			float zoom_old = camera.zoom;
-			camera.zoom += 0.08f * wheelDelta;
-			if (camera.zoom > 3.0f) camera.zoom = 3.0f;
-			if (camera.zoom < 0.2f) camera.zoom = 0.2f;
-			float zoomDelta = zoom_old / camera.zoom;
-			camera.target.x = zoomDelta * camera.target.x + (1 - zoomDelta) * mouseWorldPos.x;
-			camera.target.y = zoomDelta * camera.target.y + (1 - zoomDelta) * mouseWorldPos.y;
-		}
-
-		if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-			if (isinmap(mouseWorldPos)) {
-				camera.offset.x += GetMouseDelta().x;
-				camera.offset.y += GetMouseDelta().y;
+		width = GetScreenWidth();
+		height = GetScreenHeight();
+		if (running==0) break; // 响应全局退出
+		if (game_status == START) {
+			mtx_lock(&mutex);
+			memset(&statisticData, 0, sizeof(StatisticData));
+			float wheelDelta = GetMouseWheelMove();
+			Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), camera);
+			if (wheelDelta != 0) {
+				NeedToRefreshPage = true;
+				float zoom_old = camera.zoom;
+				camera.zoom += 0.08f * wheelDelta;
+				if (camera.zoom > 3.0f) camera.zoom = 3.0f;
+				if (camera.zoom < 0.2f) camera.zoom = 0.2f;
+				float zoomDelta = zoom_old / camera.zoom;
+				camera.target.x = zoomDelta * camera.target.x + (1 - zoomDelta) * mouseWorldPos.x;
+				camera.target.y = zoomDelta * camera.target.y + (1 - zoomDelta) * mouseWorldPos.y;
 			}
-			if (GetMouseDelta().x > 1 || GetMouseDelta().y > 1) { movemode = true; NeedToRefreshPage = true; }
-		}
 
-		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-			float mouseX = GetMousePosition().x;
-			float mouseY = GetMousePosition().y;
-			if (mouseX >= 20 && mouseX <= 290 && mouseY >= 20 && mouseY <= 90) {
-
-				{ displayHighLight = false; NeedToRefreshPage = true; }
-			}
-			else {
-
+			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
 				if (isinmap(mouseWorldPos)) {
-					movemode = false;
-					displaychosen = true;
-					NeedToRefreshPage = true;
+					camera.offset.x += GetMouseDelta().x;
+					camera.offset.y += GetMouseDelta().y;
+				}
+				if (GetMouseDelta().x > 1 || GetMouseDelta().y > 1) { movemode = true; NeedToRefreshPage = true; }
+			}
+
+			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				float mouseX = GetMousePosition().x;
+				float mouseY = GetMousePosition().y;
+				if (mouseX >= 20 && mouseX <= 290 && mouseY >= 20 && mouseY <= 90) {
+
+					{ displayHighLight = false; NeedToRefreshPage = true; }
 				}
 				else {
-					displayHighLight = false;
-					NeedToRefreshPage = true;
-				}
 
-			}
-		}
+					if (isinmap(mouseWorldPos)) {
+						movemode = false;
+						displaychosen = true;
+						NeedToRefreshPage = true;
+					}
+					else {
+						displayHighLight = false;
+						NeedToRefreshPage = true;
+					}
 
-		if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-			displaychosen = false;
-			NeedToRefreshPage = true;
-
-			if (!movemode && isinmap(mouseWorldPos)) {
-				int x = chosenLine(mouseWorldPos.x), y = chosenColumn(mouseWorldPos.y);
-				if (mapL1[x - 1][y - 1].owner == 1 || (moveable && (x - lastchosenblock[0]) * (x - lastchosenblock[0]) + (y - lastchosenblock[1]) * (y - lastchosenblock[1]) == 1)) {
-					chosenblock[0] = x;
-					chosenblock[1] = y;
-					displayHighLight = true;
 				}
 			}
-		}
-		if (IsKeyPressed(KEY_LEFT)) if (chosenblock[0] > 0) { chosenblock[0]--; NeedToRefreshPage = true; }
-		if (IsKeyPressed(KEY_RIGHT)) if (chosenblock[0] < line) { chosenblock[0]++; NeedToRefreshPage = true; }
-		if (IsKeyPressed(KEY_UP)) if (chosenblock[1] > 0) { chosenblock[1]--; NeedToRefreshPage = true; }
-		if (IsKeyPressed(KEY_DOWN)) if (chosenblock[1] < column) { chosenblock[1]++; NeedToRefreshPage = true; }
-		if (IsKeyPressed(KEY_Z)) if (movecount > 0) { movecount--; NeedToRefreshPage = true; }
 
-		if (!displayHighLight) {
-			chosenblock[0] = -1;
-			chosenblock[1] = -1;
-			moveable = false;
-			lastchosenblock[0] = -1;
-			lastchosenblock[1] = -1;
-		}
+			if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+				displaychosen = false;
+				NeedToRefreshPage = true;
 
-		if (displayHighLight) {
-			if (moveable && (chosenblock[0] != lastchosenblock[0] || chosenblock[1] != lastchosenblock[1])) {
-				//printf("cal=%d\n", (chosenblock[0] - lastchosenblock[0]) * (chosenblock[0] - lastchosenblock[0]) + (chosenblock[1] - lastchosenblock[1]) * (chosenblock[1] - lastchosenblock[1]));
-				if ((chosenblock[0] - lastchosenblock[0]) * (chosenblock[0] - lastchosenblock[0]) + (chosenblock[1] - lastchosenblock[1]) * (chosenblock[1] - lastchosenblock[1]) == 1) {
-					movelist[movecount].startx = lastchosenblock[0];
-					movelist[movecount].starty = lastchosenblock[1];
-					movelist[movecount].endx = chosenblock[0];
-					movelist[movecount].endy = chosenblock[1];
-					movecount++;
-					pthread_cond_signal(&cond);
+				if (!movemode && isinmap(mouseWorldPos)) {
+					int x = chosenLine(mouseWorldPos.x), y = chosenColumn(mouseWorldPos.y);
+					if (mapL1[x - 1][y - 1].owner == playernum || (moveable && (x - lastchosenblock[0]) * (x - lastchosenblock[0]) + (y - lastchosenblock[1]) * (y - lastchosenblock[1]) == 1)) {
+						chosenblock[0] = x;
+						chosenblock[1] = y;
+						displayHighLight = true;
+					}
 				}
-				else moveable = false;
 			}
-			if (mapL1[chosenblock[0] - 1][chosenblock[1] - 1].owner == 1) moveable = true;
-		}
-		lastchosenblock[0] = chosenblock[0];
-		lastchosenblock[1] = chosenblock[1];
+			if (IsKeyPressed(KEY_LEFT)) if (chosenblock[0] > 0) { chosenblock[0]--; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_RIGHT)) if (chosenblock[0] < line) { chosenblock[0]++; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_UP)) if (chosenblock[1] > 0) { chosenblock[1]--; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_DOWN)) if (chosenblock[1] < column) { chosenblock[1]++; NeedToRefreshPage = true; }
+			if (IsKeyPressed(KEY_Z)) if (movecount > 0) { movecount--; NeedToRefreshPage = true; }
 
-		if (IsWindowResized()) NeedToRefreshPage = true;
+			if (!displayHighLight) {
+				chosenblock[0] = -1;
+				chosenblock[1] = -1;
+				moveable = false;
+				lastchosenblock[0] = -1;
+				lastchosenblock[1] = -1;
+			}
 
-		BeginDrawing();
-		if (NeedToRefreshPage) {
+			if (displayHighLight) {
+				if (moveable && (chosenblock[0] != lastchosenblock[0] || chosenblock[1] != lastchosenblock[1])) {
+					//printf("cal=%d\n", (chosenblock[0] - lastchosenblock[0]) * (chosenblock[0] - lastchosenblock[0]) + (chosenblock[1] - lastchosenblock[1]) * (chosenblock[1] - lastchosenblock[1]));
+					if ((chosenblock[0] - lastchosenblock[0]) * (chosenblock[0] - lastchosenblock[0]) + (chosenblock[1] - lastchosenblock[1]) * (chosenblock[1] - lastchosenblock[1]) == 1) {
+						movelist[movecount].startx = lastchosenblock[0];
+						movelist[movecount].starty = lastchosenblock[1];
+						movelist[movecount].endx = chosenblock[0];
+						movelist[movecount].endy = chosenblock[1];
+						movecount++;
+						if (movecount == 1) NeedToUploadData = true;
+						messageType = UPLOAD_MOVE;
+						cnd_signal(&cond);
+					}
+					else moveable = false;
+				}
+				if (mapL1[chosenblock[0] - 1][chosenblock[1] - 1].owner == playernum) moveable = true;
+			}
+			lastchosenblock[0] = chosenblock[0];
+			lastchosenblock[1] = chosenblock[1];
+
+			if (IsWindowResized()) NeedToRefreshPage = true;
+
+			BeginDrawing();
 			ClearBackground(background);
 			BeginMode2D(camera);
 
@@ -242,12 +257,14 @@ int Renderer() {
 
 			for (int i = 1; i <= line; i++) for (int j = 1; j <= column; j++) {
 				if (mapL1[i - 1][j - 1].type != PLAIN) DrawTexture(tobstacle, i * 130 - 130 - line * 65 + 15, -130 - column * 65 + 15 + j * 130, WHITE);
-			}
-			//layer1:highlight
-			for (int i = 1; i <= line; i++) for (int j = 1; j <= column; j++) {
 				DrawL1Block(mapL1, i - 1, j - 1, playernum);
+				if (mapL1[i - 1][j - 1].owner > 0) {
+					statisticData.land[mapL1[i - 1][j - 1].owner - 1]++;
+					statisticData.army[mapL1[i - 1][j - 1].owner - 1] += mapL1[i - 1][j - 1].num;
+				}
 			}
-
+			GetRank();
+			if (statisticData.army[playernum - 1] == 0) game_status = LOSE;
 			//layer2:arrows
 			for (int i = 0; i < movecount; i++) {
 				DrawArrow(movelist[i]);
@@ -263,13 +280,75 @@ int Renderer() {
 			DrawRectangle(30, 30, 270, 70, GeneralsGreen);
 			DrawRectangle(20, 20, 270, 70, WHITE);
 			DrawText(TextFormat("Round %d", roundn), 35, 35, 35, BLACK);
-
-			NeedToRefreshPage = true;
-			pthread_mutex_unlock(&mutex);
+			DrawCountTable();
+			mtx_unlock(&mutex);
+			EndDrawing();
 		}
-		else pthread_mutex_unlock(&mutex);
-		EndDrawing();
+		if (game_status == DISCONNECTED) {
+			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { tryconnect = 1; cnd_signal(&cond); }
+			BeginDrawing();
+			ClearBackground(background);
+			DrawTextAtCenter("Disconnected", width / 2, height / 2 - 60, 35, WHITE);
+			EndDrawing();
+		}
+		if (game_status == WAITING) {
+			GetRank();
+			BeginDrawing();
+			ClearBackground(background);
+			DrawTextAtCenter("Connected", width / 2, height / 2 - 60, 35, WHITE);
+			Rectangle readyButton;
+			if (gameReady == 0) readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 30, 35, BLACK, WHITE, GeneralsGreen);
+			else readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 30, 35, WHITE, GeneralsGreen, BLACK);
+			if (CheckCollisionPointRec(GetMousePosition(), readyButton)) {
+				if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+					gameReady ^= 1;
+					currentCMD = gameReady;
+					messageType = CLIENT_CMD;
+					NeedToUploadData = true;
+					cnd_signal(&cond);
+				}
+				DrawRectangleRec(readyButton, (Color) { 0, 0, 0, 64 });
+			}
+			DrawCountTable();
+			EndDrawing();
+		}
+		if (game_status == READY) {
+			BeginDrawing();
+			ClearBackground(background);
+			DrawTextAtCenter("Game Starting", width / 2, height / 2 - 30, 35, WHITE);
+			EndDrawing();
+		}
+		if (game_status == LOSE) {
+			memset(&statisticData, 0, sizeof(StatisticData));
+			BeginDrawing();
+			ClearBackground(background);
+			BeginMode2D(camera);
 
+			//layer0:basic map(unlit)
+			DrawRectangleRec(map_layer0, map_unlit);
+
+			for (int i = 1; i <= line; i++) for (int j = 1; j <= column; j++) {
+				if (mapL1[i - 1][j - 1].type != PLAIN) DrawTexture(tobstacle, i * 130 - 130 - line * 65 + 15, -130 - column * 65 + 15 + j * 130, WHITE);
+				if (mapL1[i - 1][j - 1].owner > 0) {
+					statisticData.land[mapL1[i - 1][j - 1].owner - 1]++;
+					statisticData.army[mapL1[i - 1][j - 1].owner - 1] += mapL1[i - 1][j - 1].num;
+				}
+			}
+			GetRank();
+			EndMode2D();
+			//layer4:fixed buttons
+			DrawText(TextFormat("Actual FPS: %d", GetFPS()), 20, 120, 35, WHITE);
+			DrawRectangle(30, 30, 270, 70, GeneralsGreen);
+			DrawRectangle(20, 20, 270, 70, WHITE);
+			DrawText(TextFormat("Round %d", roundn), 35, 35, 35, BLACK);
+			DrawCountTable();
+			DrawRectangle(width / 2 - 250, height / 2 - 175, 500, 350, WHITE);
+			DrawTextAtCenter("YOU LOSE!", width / 2, height / 2 - 50, 50, BLACK);
+			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
+			mtx_unlock(&mutex);
+			EndDrawing();
+
+		}
 
 	}
 
@@ -288,50 +367,172 @@ int Renderer() {
 	UnloadTexture(arrowright);
 	return 0;
 }
-int MapDownload(SOCKET sock) {
-	while (true) {
-		//printf("trying to download map...\n");
-		recv(sock, mapbuffer, line * column * sizeof(Block), MSG_WAITALL);
-		char isappliedtmp,roundntmp;
-		recv(sock, &isappliedtmp, sizeof(char), MSG_WAITALL);
-		recv(sock, &roundntmp, sizeof(int), MSG_WAITALL);
-		pthread_mutex_lock(&mutex);
-		//printf("download success!\n");
-		NeedToRefreshPage = true;
-		for (int i = 0; i < line; i++) for (int j = 0; j < column; j++) mapL1[i][j] = mapbuffer[i * column + j];
-		roundn = roundntmp;
-		if(isappliedtmp>0){
-			movecount -= isappliedtmp;
-			for (int i = 0; i < movecount; i++) {
-				movelist[i] = movelist[i + isappliedtmp];
+int recv_from_server(void* arg) {
+	SOCKET sock = (SOCKET)arg;
+	while (running) {
+		char msgType;
+		if (recv(sock, &msgType, 1, MSG_WAITALL) <= 0) {running=false; break; }
+		if (msgType == MAP_DATA)
+		{
+			//printf("trying to download map...\n");
+			recv(sock, mapbuffer, line * column * sizeof(Block), MSG_WAITALL);
+			char isappliedtmp, roundntmp;
+			recv(sock, &isappliedtmp, sizeof(char), MSG_WAITALL);
+			recv(sock, &roundntmp, sizeof(int), MSG_WAITALL);
+			mtx_lock(&mutex);
+			//printf("download success!\n");
+			NeedToRefreshPage = true;
+			for (int i = 0; i < line; i++) for (int j = 0; j < column; j++) mapL1[i][j] = mapbuffer[i * column + j];
+			roundn = roundntmp;
+			if (isappliedtmp > 0) {
+				movecount -= isappliedtmp;
+				for (int i = 0; i < movecount; i++) {
+					movelist[i] = movelist[i + isappliedtmp];
+				}
+				NeedToUploadData = true;
+				messageType = UPLOAD_MOVE;
+				cnd_signal(&cond);
 			}
-			NeedToUploadMove = true;
-			pthread_cond_signal(&cond);
+			mtx_unlock(&mutex);
 		}
-		pthread_mutex_unlock(&mutex);
+		if (msgType == SERVER_CMD) {
+			char serverCmd;
+			recv(sock, &serverCmd, 1, MSG_WAITALL);
+			printf("received message %d \n", (int)msgType);
+			switch (serverCmd) {
+			case GAME_START:
+				game_status = START;
+				break;
+			case GAME_LOSE:
+				game_status = LOSE;
+				break;
+			case SHOW_MAP:
+				game_status = ENDGAME;
+				break;
+			case GAME_READY:
+				game_status = READY;
+				line = setupdata.mapx;
+				column = setupdata.mapy;
+				map_layer0 = (Rectangle){ -line * 65,-column * 65,line * 130,column * 130 };
+				if (line <= 10 && column <= 10) camera.zoom = 1.0f;
+				mapL1 = malloc(line * sizeof(Block*));
+				for (int i = 0; i < line; i++) {
+					mapL1[i] = malloc(column * sizeof(Block));
+				}
+				mapbuffer = malloc(line * column * sizeof(Block));
+				break;
+			default:
+				break;
+			}
+		}
+		if (msgType == SETUP_DATA) {
+			SetupData tmpsetup;
+			recv(sock, &tmpsetup, sizeof(SetupData), MSG_WAITALL);
+			mtx_lock(&mutex);
+			setupdata = tmpsetup;
+			memcpy(playercolor, setupdata.playercolor, 8 * sizeof(Color));
+			playernum = setupdata.clientnum + 1;
+			mtx_unlock(&mutex);
+		}
 	}
 	return 0;
 }
-int MoveUpload(SOCKET sock) {
-	while (true) {
-		pthread_mutex_lock(&mutex);
-		printf("available\n");
-		while (NeedToUploadMove == false || movecount == 0) {
-			pthread_cond_wait(&cond, &mutex);
+int send_to_server(void* arg) {
+	SOCKET sock = (SOCKET)arg;
+	while (running) {
+		mtx_lock(&mutex);
+		while (NeedToUploadData == false && running) {
+			cnd_wait(&cond, &mutex);
 		}
-		printf("try to upload move\n");
-		Move tmpmove = movelist[0];
-		while ((mapL1[tmpmove.startx - 1][tmpmove.starty - 1].owner != playernum || mapL1[tmpmove.endx - 1][tmpmove.endy - 1].type == MOUNTAIN) && movecount>0) {
-			movecount--;
-			for (int i = 0; i < movecount; i++) movelist[i] = movelist[i + 1];
-			tmpmove = movelist[0];
+		if (running==false) { mtx_unlock(&mutex); break; }
+		NeedToUploadData = false;
+		printf("try to send %d\n", (int)messageType);
+		if (messageType == UPLOAD_MOVE && movecount > 0) {
+			Move tmpmove = movelist[0];
+			while ((mapL1[tmpmove.startx - 1][tmpmove.starty - 1].owner != playernum || mapL1[tmpmove.endx - 1][tmpmove.endy - 1].type == MOUNTAIN) && movecount > 0) {
+				movecount--;
+				for (int i = 0; i < movecount; i++) movelist[i] = movelist[i + 1];
+				tmpmove = movelist[0];
+			}
+			int tmpcnt = movecount;
+			mtx_unlock(&mutex);
+			if (tmpcnt > 0) {
+				char msgType = UPLOAD_MOVE;
+				send(sock, &msgType, 1, 0);
+				send(sock, &tmpmove, sizeof(Move), 0);
+			}
 		}
-		printf("now jumped\n");
-		int tmpcnt = movecount;
-		pthread_mutex_unlock(&mutex);
-		if(tmpcnt>0) send(sock, &tmpmove, sizeof(Move), 0);
-		pthread_mutex_lock(&mutex);
-		if(tmpcnt>0) NeedToUploadMove = false;
-		pthread_mutex_unlock(&mutex);
+		else if (messageType == CLIENT_CMD) {
+			char msgTpe = messageType;
+			char tmpCMD = currentCMD;
+			mtx_unlock(&mutex);
+			send(sock, &messageType, 1, 0);
+			send(sock, &currentCMD, 1, 0);
+		}
+		else 	mtx_unlock(&mutex);
+
+	}
+	return 0;
+}
+int Control(void* arg) {
+	SOCKET sock = (SOCKET)arg;
+	struct sockaddr_in serv_addr;
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(PORT);
+	inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+	while (running) {
+		mtx_lock(&mutex);
+		while (tryconnect == 0 && atomic_load(&running)) cnd_wait(&cond, &mutex);
+		mtx_unlock(&mutex);
+		if (!atomic_load(&running)) break;
+		if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) >= 0) break;
+	}
+	if (!atomic_load(&running)) return 0;
+	game_status = WAITING;
+	thrd_create(&send_fd, send_to_server, (void*)sock);
+	thrd_create(&recv_fd, recv_from_server, (void*)sock);
+	return 0;
+}
+
+void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color) {
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	DrawTextEx(font, text, (Vector2) { (int)(x - textsize.x / 2), (int)(y - textsize.y / 2) }, fontsize, TEXT_SPACING, color);
+}
+Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textColor, Color buttonColor, Color shaderColor) {
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	Rectangle button = { x - textsize.x / 2 - 30,y - textsize.y / 2 - 20,textsize.x + 60,textsize.y + 40 };
+	Rectangle shader = { x - textsize.x / 2 - 25,y - textsize.y / 2 - 15,textsize.x + 60,textsize.y + 40 };
+	DrawRectangleRec(shader, shaderColor);
+	DrawRectangleRec(button, buttonColor);
+	DrawTextAtCenter(text, x, y, fontsize, textColor);
+	return button;
+}
+void DrawCountTable() {
+	DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH - TABLE_PLAYER_WIDTH, 0, TABLE_PLAYER_WIDTH, TABLE_HEIGHT, "Player", TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+	DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH, 0, TABLE_ARMY_WIDTH, TABLE_HEIGHT, "Army", TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+	DrawFilledRectangle(width - TABLE_LAND_WIDTH, 0, TABLE_LAND_WIDTH, TABLE_HEIGHT, "Land", TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+	for (int i = 1; i <= setupdata.totalnum; i++) {
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH - TABLE_PLAYER_WIDTH, TABLE_HEIGHT * i, TABLE_PLAYER_WIDTH, TABLE_HEIGHT, setupdata.playername[rank[i - 1] - 1], TABLE_FONTSIZE, BLACK, setupdata.playercolor[rank[i - 1] - 1], WHITE);
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH - TABLE_ARMY_WIDTH, TABLE_HEIGHT * i, TABLE_ARMY_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.army[rank[i - 1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+		DrawFilledRectangle(width - TABLE_LAND_WIDTH, TABLE_HEIGHT * i, TABLE_LAND_WIDTH, TABLE_HEIGHT, TextFormat("%d", statisticData.land[rank[i - 1] - 1]), TABLE_FONTSIZE, BLACK, WHITE, BLACK);
+	}
+}
+void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor) {
+	Rectangle background = { startx,starty,width,height };
+	DrawRectangleRec(background, fillColor);
+	DrawRectangleLinesEx(background, TABLE_LINE_WIDTH, lineColor);
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	while (textsize.x > width) {
+		fontsize--;
+		textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	}
+	DrawTextAtCenter(text, startx + width / 2, starty + height / 2, fontsize, textcolor);
+}
+void GetRank() {
+	for (int i = 0; i < 8; i++) rank[i] = i + 1;
+	for (int i = 0; i < 8; i++) for (int j = i + 1; j < 8; j++) if (statisticData.army[rank[i] - 1] < statisticData.army[rank[j] - 1] || (statisticData.army[rank[i] - 1] == statisticData.army[rank[j] - 1] && statisticData.land[rank[i] - 1] < statisticData.land[rank[j] - 1])) {
+		int tmp = rank[i];
+		rank[i] = rank[j];
+		rank[j] = tmp;
 	}
 }

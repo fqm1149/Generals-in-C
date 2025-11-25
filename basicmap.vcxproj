@@ -84,7 +84,7 @@
     <LibraryPath>D:\PKU\Raylib\raylib-5.5_win64_msvc16\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>D:\PKU\Raylib\raylib-5.5_win64_msvc16\include;$(IncludePath)</IncludePath>
+    <IncludePath>D:\PKU\generals_re\GUI\alpha\basicmap\;D:\PKU\Raylib\raylib-5.5_win64_msvc16\include;$(IncludePath)</IncludePath>
     <LibraryPath>D:\PKU\Raylib\raylib-5.5_win64_msvc16\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
