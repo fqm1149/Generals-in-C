@@ -46,14 +46,20 @@
 #define CLIENT_EXIT 2
 #define CLIENT_READY 1
 #define CLIENT_CANCEL 0
+#define CLIENT_LOSE 3
 
-//game status:
+//game status of client:
 #define DISCONNECTED 0
 #define WAITING 1
 #define START 2
 #define LOSE 3
 #define ENDGAME 4
 #define READY 5
+
+
+//game status of server:
+
+
 
 //UI standard
 #define TEXT_SPACING 5

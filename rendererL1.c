@@ -14,8 +14,7 @@ extern Color playercolor[8];
 
 
 //传入的x与y应是实际坐标减去1
-void DrawL1Block(Block** mapL1, int x, int y,int player) {
-	bool islit = false;
+void DrawL1Block(Block** mapL1, int x, int y,int player, bool islit) {
 	for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) {
 		int tx = x + i, ty = y + j;
 		if (tx >= 0 && tx < line && ty >= 0 && ty < column) if (mapL1[tx][ty].owner == player) islit = true;

@@ -13,7 +13,7 @@ extern bool isinmap(Vector2 mouseInWorld);
 extern int chosenColumn(float mouse_Y);
 extern int chosenLine(float mouse_X);
 extern void drawhighlight(int mapx, int mapy,Color color,int islit);
-extern void DrawL1Block(Block** mapL1, int x, int y,int player);
+extern void DrawL1Block(Block** mapL1, int x, int y,int player,bool islit);
 int MoveOneStep();
 void DrawArrow(Move move);
 void DrawArrowWithShader(Texture arrow, int x, int y);
@@ -55,6 +55,8 @@ int width, height;
 Font font;
 int rank[8];//rank i 表示第i名是谁
 bool running = true;
+bool showmap = false;
+bool islose = false;
 
 int main(void)
 {
@@ -262,14 +264,22 @@ int Renderer() {
 
 			for (int i = 1; i <= line; i++) for (int j = 1; j <= column; j++) {
 				if (mapL1[i - 1][j - 1].type != PLAIN) DrawTexture(tobstacle, i * 130 - 130 - line * 65 + 15, -130 - column * 65 + 15 + j * 130, WHITE);
-				DrawL1Block(mapL1, i - 1, j - 1, playernum);
+				DrawL1Block(mapL1, i - 1, j - 1, playernum,false);
 				if (mapL1[i - 1][j - 1].owner > 0) {
 					statisticData.land[mapL1[i - 1][j - 1].owner - 1]++;
 					statisticData.army[mapL1[i - 1][j - 1].owner - 1] += mapL1[i - 1][j - 1].num;
 				}
 			}
 			GetRank();
-			if (statisticData.army[playernum - 1] == 0) game_status = LOSE;
+			if (statisticData.army[playernum - 1] == 0) {
+				islose = true;
+				game_status = LOSE;
+				currentCMD = CLIENT_LOSE;
+				messageType = CLIENT_CMD;
+				NeedToUploadData = true;
+				cnd_signal(&cond);
+			}
+
 			//layer2:arrows
 			for (int i = 0; i < movecount; i++) {
 				DrawArrow(movelist[i]);
@@ -350,10 +360,48 @@ int Renderer() {
 			DrawCountTable();
 			DrawRectangle(width/2 - 250, height/2 - 175, 500, 350, WHITE);
 			DrawTextAtCenter("YOU LOSE!", width / 2, height / 2 - 50, 50, BLACK);
-			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
+			//Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
 			mtx_unlock(&mutex);
 			EndDrawing();
 
+		}
+		if (game_status == ENDGAME) {
+			mtx_lock(&mutex);
+			memset(&statisticData, 0, sizeof(StatisticData));
+			BeginDrawing();
+			ClearBackground(background);
+			BeginMode2D(camera);
+
+			//layer0:basic map(unlit)
+			DrawRectangleRec(map_layer0, map_unlit);
+
+			for (int i = 1; i <= line; i++) for (int j = 1; j <= column; j++) {
+				if (mapL1[i - 1][j - 1].type != PLAIN) DrawTexture(tobstacle, i * 130 - 130 - line * 65 + 15, -130 - column * 65 + 15 + j * 130, WHITE);
+				DrawL1Block(mapL1, i - 1, j - 1, playernum,true);
+				if (mapL1[i - 1][j - 1].owner > 0) {
+					statisticData.land[mapL1[i - 1][j - 1].owner - 1]++;
+					statisticData.army[mapL1[i - 1][j - 1].owner - 1] += mapL1[i - 1][j - 1].num;
+				}
+			}
+			GetRank();
+			EndMode2D();
+		
+
+			//layer4:fixed buttons
+			DrawText(TextFormat("Actual FPS: %d", GetFPS()), 20, 120, 35, WHITE);
+			DrawRectangle(30, 30, 270, 70, GeneralsGreen);
+			DrawRectangle(20, 20, 270, 70, WHITE);
+			DrawText(TextFormat("Round %d", roundn), 35, 35, 35, BLACK);
+			DrawCountTable();
+			DrawRectangle(width / 2 - 250, height / 2 - 175, 500, 350, WHITE);
+			if (islose)DrawTextAtCenter("YOU LOSE!", width / 2, height / 2 - 50, 50, BLACK);
+			else DrawTextAtCenter("YOU WIN!", width / 2, height / 2 - 50, 50, BLACK);
+			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
+			if (CheckCollisionPointRec(GetMousePosition(), exitButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+				game_status = WAITING;
+			}
+			mtx_unlock(&mutex);
+			EndDrawing();
 		}
 
 	}
@@ -409,6 +457,8 @@ int recv_from_server(void* arg) {
 			switch (serverCmd) {
 			case GAME_START:
 				game_status = START;
+				gameReady = 0;
+				islose = false;
 				break;
 			case GAME_LOSE:
 				game_status = LOSE;
