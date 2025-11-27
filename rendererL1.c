@@ -31,10 +31,12 @@ void DrawL1Block(Block** mapL1, int x, int y,int player, bool islit) {
 			break;
 		case PLAIN:
 			if (mapL1[x][y].owner > 0) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, playercolor[mapL1[x][y].owner - 1]);
+			else if (mapL1[x][y].owner == -1) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, DISCONNECT_COLOR);
 			else DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, LIT_PLAIN);
 			break;
 		case CITY:
 			if (mapL1[x][y].owner > 0) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, playercolor[mapL1[x][y].owner - 1]);
+			else if (mapL1[x][y].owner == -1) DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, DISCONNECT_COLOR);
 			else DrawRectangle(-65 * line + 130 * x, -65 * column + 130 * y, 130, 130, LIT_CITY);
 			DrawTexture(tcity, -65 * line + 130 * x + 15, -65 * column + 130 * y + 15, WHITE);
 			break;

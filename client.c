@@ -72,12 +72,8 @@ int main(void)
 	thrd_create(&ctrl_fd, Control, (void*)sock);
 
 	Renderer();
+	closesocket(sock);
 
-	NeedToUploadData = true;
-	currentCMD = CLIENT_EXIT;
-	messageType = CLIENT_CMD;
-	cnd_signal(&cond);
-	Sleep(50);
 	// 请求线程优雅退出
 	running = false;
 	cnd_signal(&cond); // 唤醒可能等待的线程
@@ -93,7 +89,6 @@ int main(void)
 	free(mapbuffer);
 	mtx_destroy(&mutex);
 	cnd_destroy(&cond);
-	closesocket(sock);
 	WSACleanup();
 	printf("cleaned\n");
 

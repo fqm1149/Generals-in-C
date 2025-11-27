@@ -23,6 +23,7 @@
 #define LIT_PLAIN (Color){220,220,220,255}
 #define LIT_MOUNTAIN (Color){187,187,187,255}
 #define LIT_CITY (Color){128,128,128,255}
+#define DISCONNECT_COLOR (Color){80,80,80,255}
 
 #define FONTSIZE_ARMY 100
 #define CITY_PERCENTAGE 20
@@ -57,7 +58,7 @@
 #define READY 5
 
 
-//game status of server:
+//game status of server:1,2,5
 
 
 

@@ -9,7 +9,7 @@
 #include <threads.h>
 
 thrd_t send_fd, recv_fd, logic_fd;
-mtx_t mutex;
+mtx_t mutex,mutex_netIO;
 mtx_t mutex_c;
 mtx_t mutex_e;
 cnd_t cond;
@@ -21,15 +21,13 @@ int MoveOneStep(Move move);
 void OwnerReplace(int loser, int winner);
 
 bool running = 1;
-bool ingame;
 
 bool NeedToSendData = false;
 int condition_exit = 0;
 int line = LINE;
 int column = COLUMN;
 char isappliedtmp[8];
-int playercount;
-int alivecount;
+int playercount,alivecount,waitcount;
 Block** mapL1;
 Block* send_buffer;
 Move movebuffer[8] = { 0 };
@@ -40,12 +38,14 @@ int roundn = 0;
 struct sockaddr_in address;
 int addrlen;
 SetupData setupdata = { 0 };
-char messageType, currentCMD;
+char messageType, currentCMD,game_status;
+SOCKET wait_fd[8];
 int main(void)
 {
 	mtx_init(&mutex, mtx_plain);
 	mtx_init(&mutex_c,mtx_plain);
 	mtx_init(&mutex_e,mtx_plain);
+	mtx_init(&mutex_netIO, mtx_plain);
 	cnd_init(&cond);
 	cnd_init(&cond_exit);
 
@@ -60,7 +60,7 @@ int main(void)
 		return 1;
 	}
 	printf("setting up...\n");
-
+	game_status = WAITING;
 	//初始化监听
 	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 	while (listen_fd == INVALID_SOCKET) {
@@ -149,42 +149,34 @@ int send_to_client(void* arg) {
 
 			mtx_unlock(&mutex);
 			//发送
+			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
 				char msgType = MAP_DATA;
-				int a = send(client_fd[i], &msgType, 1, 0);
-
-				if (a == SOCKET_ERROR) {
-					printf("client %d disconnected (send error %d)\n", i, WSAGetLastError());
-					closesocket(client_fd[i]);
-					condition_exit = 1;
-					cnd_signal(&cond_exit);
-					continue;
-				}
-				if (send(client_fd[i], send_buffer, line * column * sizeof(Block), 0) == SOCKET_ERROR) {
-					printf("client %d disconnected during map send (%d)\n", i, WSAGetLastError());
-					closesocket(client_fd[i]);
-					condition_exit = 1;
-					cnd_signal(&cond_exit);
-					continue;
-				}
+				send(client_fd[i], &msgType, 1, 0);
+				send(client_fd[i], send_buffer, line * column * sizeof(Block), 0);
 				send(client_fd[i], &isappliedtmp[i], sizeof(char), 0);
 				send(client_fd[i], &roundt, sizeof(int), 0);
 			}
+			mtx_unlock(&mutex_netIO);
 			printf("map sent successfully!\n");
 		}
 		if (messageType == SETUP_DATA) {
+			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
 				setupdata.clientnum = i;
 				char msgType = SETUP_DATA;
 				send(client_fd[i], &msgType, 1, 0);
 				send(client_fd[i], &setupdata, sizeof(SetupData), 0);
 			}
+			mtx_unlock(&mutex_netIO);
 		}
 		if (messageType == SERVER_CMD) {
+			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
 				send(client_fd[i], &messageType, 1, 0);
 				send(client_fd[i], &currentCMD, 1, 0);
 			}
+			
 			if (currentCMD == GAME_READY) {
 				srand((unsigned int)time(NULL));
 				int** map = generatemap(line, column, playercount);
@@ -212,13 +204,15 @@ int send_to_client(void* arg) {
 					}
 				}
 			}
+			mtx_unlock(&mutex_netIO);
 			if (currentCMD == GAME_START) {
 				setupdata.readynum = 0;
-				ingame = true;
+				alivecount = playercount;
+				game_status = START;
 				thrd_create(&logic_fd, logic_process, NULL);
 				}
 			if (currentCMD == SHOW_MAP) {
-				ingame = false;
+				game_status = WAITING;
 				for (int i = 0; i < line; i++) free(mapL1[i]);
 				free(mapL1);
 				free(send_buffer);
@@ -270,17 +264,41 @@ int recv_from_client(void* arg) {
 				int ret = recv(client_fd[i], &msgType, 1, MSG_WAITALL);
 				if (ret <= 0) {
 					printf("client %d disconnected (recv=%d, err=%d)\n", i, ret, WSAGetLastError());
+					mtx_lock(&mutex_netIO);
 					closesocket(client_fd[i]);
 					FD_CLR(client_fd[i], &readfds);
 					// 从数组中移除该 client 并调整 playercount
-					for (int k = i; k < playercount - 1; k++) client_fd[k] = client_fd[k + 1];
+					if (game_status == START) {
+						OwnerReplace(i + 1, -1);
+					}
+					Color tmpcolor = setupdata.playercolor[i];
+					for (int k = i; k < playercount - 1; k++) {
+						client_fd[k] = client_fd[k + 1];
+						setupdata.playercolor[k] = setupdata.playercolor[k + 1];
+						memcpy(setupdata.playername[k], setupdata.playername[k + 1], 20);
+						if (game_status == START) OwnerReplace(k + 2, k + 1);
+					}
+					setupdata.playercolor[playercount - 1] = tmpcolor;
 					playercount--;
 					setupdata.totalnum = playercount;
 					// 重新计算 maxfd
 					maxfd = listen_fd;
 					for (int k = 0; k < playercount; k++) if (client_fd[k] > maxfd) maxfd = client_fd[k];
-					condition_exit = 1;
-					cnd_signal(&cond_exit);
+					if (game_status == START) {
+						alivecount--;
+						printf("detect discnnted,alivecount now: %d\n", alivecount);
+						if (alivecount <= 1) {
+							currentCMD = SHOW_MAP;
+							messageType = SERVER_CMD;
+							NeedToSendData = true;
+							cnd_signal(&cond);
+							mtx_unlock(&mutex_netIO); i--; continue;
+						}
+					}
+					messageType = SETUP_DATA;
+					NeedToSendData = true;
+					cnd_signal(&cond);
+					mtx_unlock(&mutex_netIO);
 					i--; // 已移位，保持索引正确
 					continue;
 				}
@@ -295,10 +313,6 @@ int recv_from_client(void* arg) {
 				if (msgType == CLIENT_CMD) {
 					char clientCmd;
 					recv(client_fd[i], &clientCmd, 1, MSG_WAITALL);
-					if (clientCmd == CLIENT_EXIT) {
-						condition_exit = 1;
-						cnd_signal(&cond_exit);
-					}
 					if (clientCmd == CLIENT_READY) {
 						setupdata.readynum++;
 						if (setupdata.readynum == playercount && playercount > 1) {
@@ -390,7 +404,7 @@ int MoveOneStep(Move move) {
 
 int logic_process(void* arg) {
 	(void)arg;
-	while (condition_exit == 0 && running != 0 && ingame == true) {
+	while (condition_exit == 0 && running != 0 && game_status == START) {
 		mtx_lock(&mutex);
 		//轮数增加
 		roundn++;
