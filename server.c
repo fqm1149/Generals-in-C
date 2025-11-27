@@ -9,8 +9,9 @@
 #include <threads.h>
 
 thrd_t send_fd, recv_fd, logic_fd;
-mtx_t mutex,mutex_netIO;
-mtx_t mutex_c;
+mtx_t mutex;//数据读写保护（游戏逻辑部分）
+mtx_t mutex_netIO;//确保发送过程不受干扰 或者说更改重要大文件时不会产生发送动作
+mtx_t mutex_c;//确保进程间的通信完整
 mtx_t mutex_e;
 cnd_t cond;
 cnd_t cond_exit;
@@ -40,6 +41,32 @@ int addrlen;
 SetupData setupdata = { 0 };
 char messageType, currentCMD,game_status;
 SOCKET wait_fd[8];
+void SendWait(SOCKET fd) {
+	char wms = SERVER_CMD;
+	char wcmd = WAIT_FOR_END;
+	send(fd, &wms, 1, NULL);
+	send(fd, &wcmd, 1, NULL);
+}
+void SendJoin(SOCKET fd) {
+	char wms = SERVER_CMD;
+	char wcmd = JOIN;
+	send(fd, &wms, 1, NULL);
+	send(fd, &wcmd, 1, NULL);
+}
+void SendSignal(char msgtype, char cmd) {
+	mtx_lock(&mutex_c);
+	messageType = msgtype;
+	currentCMD = cmd;
+	NeedToSendData = true;
+	cnd_signal(&cond);
+	mtx_unlock(&mutex_c);
+}
+void LazyColorSetup() {
+	setupdata.playercolor[0] = (Color){ 240,50,230,255 };
+	setupdata.playercolor[1] = (Color){ 39,146,255,255 };
+	setupdata.playercolor[2] = (Color){ 128,0,128,255 };
+	setupdata.playercolor[3] = (Color){ 250,140,1,255 };
+}
 int main(void)
 {
 	mtx_init(&mutex, mtx_plain);
@@ -48,11 +75,7 @@ int main(void)
 	mtx_init(&mutex_netIO, mtx_plain);
 	cnd_init(&cond);
 	cnd_init(&cond_exit);
-
-	setupdata.playercolor[0] = (Color){ 240,50,230,255 };
-	setupdata.playercolor[1] = (Color){ 39,146,255,255 };
-	setupdata.playercolor[2] = (Color){ 128,0,128,255 };
-	setupdata.playercolor[3] = (Color){ 250,140,1,255 };
+	LazyColorSetup();
 	WSADATA wsadata;
 	int result = WSAStartup(MAKEWORD(2, 2), &wsadata);
 	if (result != 0) {
@@ -60,7 +83,7 @@ int main(void)
 		return 1;
 	}
 	printf("setting up...\n");
-	game_status = WAITING;
+	game_status = WAITING_FOR_START;
 	//初始化监听
 	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 	while (listen_fd == INVALID_SOCKET) {
@@ -131,8 +154,10 @@ int send_to_client(void* arg) {
 		if (running == 0) { mtx_unlock(&mutex_c); break; }
 		NeedToSendData = 0;
 		printf("try to send %d\n", (int)messageType);
+		char temp_messageType = messageType;
+		char temp_currentCMD = currentCMD;
 		mtx_unlock(&mutex_c);
-		if (messageType == MAP_DATA) {
+		if (temp_messageType == MAP_DATA) {
 			//缓冲区赋值
 			mtx_lock(&mutex);
 
@@ -151,8 +176,7 @@ int send_to_client(void* arg) {
 			//发送
 			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
-				char msgType = MAP_DATA;
-				send(client_fd[i], &msgType, 1, 0);
+				send(client_fd[i], &temp_messageType, 1, 0);
 				send(client_fd[i], send_buffer, line * column * sizeof(Block), 0);
 				send(client_fd[i], &isappliedtmp[i], sizeof(char), 0);
 				send(client_fd[i], &roundt, sizeof(int), 0);
@@ -160,24 +184,23 @@ int send_to_client(void* arg) {
 			mtx_unlock(&mutex_netIO);
 			printf("map sent successfully!\n");
 		}
-		if (messageType == SETUP_DATA) {
+		if (temp_messageType == SETUP_DATA) {
 			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
 				setupdata.clientnum = i;
-				char msgType = SETUP_DATA;
-				send(client_fd[i], &msgType, 1, 0);
+				send(client_fd[i], &temp_messageType, 1, 0);
 				send(client_fd[i], &setupdata, sizeof(SetupData), 0);
 			}
 			mtx_unlock(&mutex_netIO);
 		}
-		if (messageType == SERVER_CMD) {
+		if (temp_messageType == SERVER_CMD) {
 			mtx_lock(&mutex_netIO);
 			for (int i = 0; i < playercount; i++) {
-				send(client_fd[i], &messageType, 1, 0);
-				send(client_fd[i], &currentCMD, 1, 0);
+				send(client_fd[i], &temp_messageType, 1, 0);
+				send(client_fd[i], &temp_currentCMD, 1, 0);
 			}
 			
-			if (currentCMD == GAME_READY) {
+			if (temp_currentCMD == GAME_READY) {
 				srand((unsigned int)time(NULL));
 				int** map = generatemap(line, column, playercount);
 				mapL1 = malloc(line * sizeof(Block*));
@@ -205,21 +228,27 @@ int send_to_client(void* arg) {
 				}
 			}
 			mtx_unlock(&mutex_netIO);
-			if (currentCMD == GAME_START) {
+			if (temp_currentCMD == GAME_START) {
 				setupdata.readynum = 0;
 				alivecount = playercount;
 				game_status = START;
 				thrd_create(&logic_fd, logic_process, NULL);
 				}
-			if (currentCMD == SHOW_MAP) {
-				game_status = WAITING;
+			if (temp_currentCMD == SHOW_MAP) {
+				game_status = WAITING_FOR_START;
 				for (int i = 0; i < line; i++) free(mapL1[i]);
 				free(mapL1);
 				free(send_buffer);
 				setupdata.readynum = 0;
-				messageType = SETUP_DATA;
-				NeedToSendData = true;
-				cnd_signal(&cond);
+				roundn = 0;
+				for (int i = 0; i < waitcount; i++) {
+					SendJoin(wait_fd[i]);
+					strcpy(setupdata.playername[playercount], "Anonymous");
+					client_fd[playercount++] = wait_fd[i];
+				}
+				waitcount = 0;
+				setupdata.totalnum = playercount;
+				SendSignal(SETUP_DATA, 0);
 			}
 		}
 	}
@@ -234,15 +263,18 @@ int recv_from_client(void* arg) {
 	FD_ZERO(&readfds);
 	FD_SET(listen_fd, &readfds);
 	maxfd = listen_fd;
+	struct timeval timeout;
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
 	while (running != 0) {
 		fd_set tmpfds = readfds;
-		int activity = select((int)maxfd + 1, &tmpfds, NULL, NULL, NULL);
+		int activity = select((int)maxfd + 1, &tmpfds, NULL, NULL, &timeout);
 		if (activity <= 0) continue;
 		if (FD_ISSET(listen_fd, &tmpfds)) {
 			SOCKET newfd = accept(listen_fd, (struct sockaddr*)&address, &addrlen);
 			if (newfd == INVALID_SOCKET) {
 				printf("accept failed:%d\n", WSAGetLastError());
-			} else {
+			} else if (game_status==WAITING_FOR_START) {
 				printf("new connection!\n");
 				client_fd[playercount] = newfd;
 				FD_SET(newfd, &readfds);
@@ -250,11 +282,14 @@ int recv_from_client(void* arg) {
 				strcpy(setupdata.playername[playercount], "Anonymous");
 				playercount++;
 				setupdata.totalnum = playercount;
-				messageType = SETUP_DATA;
-				mtx_lock(&mutex_c);
-				NeedToSendData = true;
-				mtx_unlock(&mutex_c);
-				cnd_signal(&cond);
+				SendSignal(SETUP_DATA, 0);
+			}
+			else {
+				printf("new connection! But need to wait\n");
+				wait_fd[waitcount++] = newfd;
+				FD_SET(newfd, &readfds);
+				if (maxfd < newfd) maxfd = newfd;
+				SendWait(newfd);
 			}
 		}
 
@@ -280,6 +315,11 @@ int recv_from_client(void* arg) {
 					}
 					setupdata.playercolor[playercount - 1] = tmpcolor;
 					playercount--;
+					if (playercount == 0) {
+						condition_exit = 1;
+						cnd_signal(&cond_exit);
+						break;
+					}
 					setupdata.totalnum = playercount;
 					// 重新计算 maxfd
 					maxfd = listen_fd;
@@ -288,17 +328,13 @@ int recv_from_client(void* arg) {
 						alivecount--;
 						printf("detect discnnted,alivecount now: %d\n", alivecount);
 						if (alivecount <= 1) {
-							currentCMD = SHOW_MAP;
-							messageType = SERVER_CMD;
-							NeedToSendData = true;
-							cnd_signal(&cond);
-							mtx_unlock(&mutex_netIO); i--; continue;
+							mtx_unlock(&mutex_netIO); 
+							SendSignal(SERVER_CMD, SHOW_MAP);
+							i--; continue;
 						}
 					}
-					messageType = SETUP_DATA;
-					NeedToSendData = true;
-					cnd_signal(&cond);
 					mtx_unlock(&mutex_netIO);
+					SendSignal(SETUP_DATA, 0);
 					i--; // 已移位，保持索引正确
 					continue;
 				}
@@ -316,45 +352,41 @@ int recv_from_client(void* arg) {
 					if (clientCmd == CLIENT_READY) {
 						setupdata.readynum++;
 						if (setupdata.readynum == playercount && playercount > 1) {
-							currentCMD = GAME_READY;
-							messageType = SERVER_CMD;
-							mtx_lock(&mutex_c);
-							NeedToSendData = true;
-							mtx_unlock(&mutex_c);
-							cnd_signal(&cond);
+							SendSignal(SERVER_CMD, GAME_READY);
 							Sleep(1500);
-							currentCMD = GAME_START;
-							mtx_lock(&mutex_c);
-							messageType = SERVER_CMD;
-							NeedToSendData = true;
-							mtx_unlock(&mutex_c);
-							cnd_signal(&cond);
+							SendSignal(SERVER_CMD, GAME_START);
 						}
 						else {
-							mtx_lock(&mutex_c);
-							messageType = SETUP_DATA;
-							NeedToSendData = true;
-							mtx_unlock(&mutex_c);
-							cnd_signal(&cond);
+							SendSignal(SETUP_DATA, 0);
 						}
 					}
 					if (clientCmd == CLIENT_CANCEL) {
 						setupdata.readynum--;
-						mtx_lock(&mutex_c);
-						messageType = SETUP_DATA;
-						NeedToSendData = true;
-						mtx_unlock(&mutex_c);
-						cnd_signal(&cond);
+						SendSignal(SETUP_DATA, 0);
 					}
 					if (clientCmd == CLIENT_LOSE) {
 						alivecount--;
 						if (alivecount <= 1) {
-							currentCMD = SHOW_MAP;
-							messageType = SERVER_CMD;
-							NeedToSendData = true;
-							cnd_signal(&cond);
+							SendSignal(SERVER_CMD, SHOW_MAP);
 						}
 					}
+				}
+			}
+		}
+		for (int i = 0; i < waitcount; i++) {
+			if (FD_ISSET(wait_fd[i], &tmpfds)) {
+				char msgType;
+				int ret = recv(wait_fd[i], &msgType, 1, MSG_WAITALL);
+				if (ret <= 0) {
+					printf("waiting client %d disconnected (recv=%d, err=%d)\n", i, ret, WSAGetLastError());
+					closesocket(wait_fd[i]);
+					FD_CLR(wait_fd[i], &readfds);
+					// 从数组中移除该 waiting client 并调整 playercount
+					waitcount--;
+					maxfd = listen_fd;
+					for (int k = 0; k < playercount; k++) if (client_fd[k] > maxfd) maxfd = client_fd[k];
+					for (int k = 0; k < waitcount; k++) if (wait_fd[k] > maxfd) maxfd = wait_fd[k];
+					i--;
 				}
 			}
 		}
@@ -424,13 +456,7 @@ int logic_process(void* arg) {
 		}
 		
 		mtx_unlock(&mutex);
-		//允许发送
-		mtx_lock(&mutex_c);
-		messageType = MAP_DATA;
-		NeedToSendData = true;
-		mtx_unlock(&mutex_c);
-		cnd_signal(&cond);
-		printf("logic thread send signal to sendmap thread\n");
+		SendSignal(MAP_DATA, 0);
 		Sleep(500);
 	}
 	return 0;

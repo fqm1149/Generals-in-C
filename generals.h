@@ -40,6 +40,8 @@
 #define GAME_LOSE 1
 #define SHOW_MAP 2
 #define GAME_READY 3
+#define WAIT_FOR_END 4
+#define JOIN 5
 //client->server datatype:
 #define UPLOAD_MOVE 0
 #define CLIENT_CMD 1
@@ -51,11 +53,12 @@
 
 //game status of client:
 #define DISCONNECTED 0
-#define WAITING 1
+#define WAITING_FOR_START 1
 #define START 2
 #define LOSE 3
 #define ENDGAME 4
 #define READY 5
+#define WAITING_FOR_END 6
 
 
 //game status of server:1,2,5

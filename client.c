@@ -28,7 +28,7 @@ int Control(void* arg);
 void GetRank();
 char isapplied = 0;
 char messageType,currentCMD;
-bool NeedToUploadData = true;
+bool NeedToSendData = true;
 bool NeedToRefreshPage = true;
 cnd_t cond;
 SetupData setupdata;
@@ -57,7 +57,12 @@ int rank[8];//rank i 表示第i名是谁
 bool running = true;
 bool showmap = false;
 bool islose = false;
-
+void SendSignal(char msgtype, char cmd) {
+	messageType = msgtype;
+	currentCMD = cmd;
+	NeedToSendData = true;
+	cnd_signal(&cond);
+}
 int main(void)
 {
 	// 初始化互斥与条件变量
@@ -84,9 +89,11 @@ int main(void)
 	thrd_join(ctrl_fd, NULL);
 
 	// 清理战场
-	for (int i = 0; i < line; i++) free(mapL1[i]);
-	free(mapL1);
-	free(mapbuffer);
+	if (game_status!=WAITING_FOR_START && game_status!=WAITING_FOR_END) {
+		for (int i = 0; i < line; i++) free(mapL1[i]);
+		free(mapL1);
+		free(mapbuffer);
+	}
 	mtx_destroy(&mutex);
 	cnd_destroy(&cond);
 	WSACleanup();
@@ -237,9 +244,7 @@ int Renderer() {
 						movelist[movecount].endx = chosenblock[0];
 						movelist[movecount].endy = chosenblock[1];
 						movecount++;
-						if (movecount == 1) NeedToUploadData = true;
-						messageType = UPLOAD_MOVE;
-						cnd_signal(&cond);
+						if (movecount == 1) SendSignal(UPLOAD_MOVE, 0);
 					}
 					else moveable = false;
 				}
@@ -269,10 +274,7 @@ int Renderer() {
 			if (statisticData.army[playernum - 1] == 0) {
 				islose = true;
 				game_status = LOSE;
-				currentCMD = CLIENT_LOSE;
-				messageType = CLIENT_CMD;
-				NeedToUploadData = true;
-				cnd_signal(&cond);
+				SendSignal(CLIENT_CMD, CLIENT_LOSE);
 			}
 
 			//layer2:arrows
@@ -301,7 +303,13 @@ int Renderer() {
 			DrawTextAtCenter("Disconnected", width / 2, height / 2-60, 35, WHITE);
 			EndDrawing();
 		}
-		if (game_status == WAITING) {
+		if (game_status == WAITING_FOR_END) {
+			BeginDrawing();
+			ClearBackground(background);
+			DrawTextAtCenter("Waiting for current game to end", width / 2, height / 2 - 60, 35, WHITE);
+			EndDrawing();
+		}
+		if (game_status == WAITING_FOR_START) {
 			GetRank();
 			BeginDrawing();
 			ClearBackground(background);
@@ -312,10 +320,7 @@ int Renderer() {
 			if (CheckCollisionPointRec(GetMousePosition(), readyButton)) {
 				if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 					gameReady ^= 1;
-					currentCMD = gameReady;
-					messageType = CLIENT_CMD;
-					NeedToUploadData = true;
-					cnd_signal(&cond);
+					SendSignal(CLIENT_CMD, gameReady);
 				}
 				DrawRectangleRec(readyButton, (Color) { 0, 0, 0, 64 });
 			}
@@ -361,6 +366,14 @@ int Renderer() {
 
 		}
 		if (game_status == ENDGAME) {
+			displayHighLight = false;
+			displaychosen = false;
+			movemode = false;
+			moveable = false;
+			chosenblock[0] = -1;
+			chosenblock[1] = -1;
+			lastchosenblock[0] = -1;
+			lastchosenblock[1] = -1;
 			mtx_lock(&mutex);
 			memset(&statisticData, 0, sizeof(StatisticData));
 			BeginDrawing();
@@ -393,7 +406,7 @@ int Renderer() {
 			else DrawTextAtCenter("YOU WIN!", width / 2, height / 2 - 50, 50, BLACK);
 			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
 			if (CheckCollisionPointRec(GetMousePosition(), exitButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-				game_status = WAITING;
+				game_status = WAITING_FOR_START;
 			}
 			mtx_unlock(&mutex);
 			EndDrawing();
@@ -439,9 +452,7 @@ int recv_from_server(void* arg) {
 				for (int i = 0; i < movecount; i++) {
 					movelist[i] = movelist[i + isappliedtmp];
 				}
-				NeedToUploadData = true;
-				messageType = UPLOAD_MOVE;
-				cnd_signal(&cond);
+				SendSignal(UPLOAD_MOVE,0);
 			}
 			mtx_unlock(&mutex);
 		}
@@ -473,6 +484,11 @@ int recv_from_server(void* arg) {
 				}
 				mapbuffer = malloc(line * column * sizeof(Block));
 				break;
+			case WAIT_FOR_END:
+				game_status = WAITING_FOR_END;
+				break;
+			case JOIN:
+				game_status = WAITING_FOR_START;
 			default:
 				break;
 			}
@@ -493,11 +509,11 @@ int send_to_server(void* arg) {
 	SOCKET sock = (SOCKET)arg;
 	while (running) {
 		mtx_lock(&mutex);
-		while (NeedToUploadData == false && running) {
+		while (NeedToSendData == false && running) {
 			cnd_wait(&cond, &mutex);
 		}
 		if (!running) { mtx_unlock(&mutex); break; }
-		NeedToUploadData = false;
+		NeedToSendData = false;
 		printf("try to send %d\n", (int)messageType);
 		if (messageType == UPLOAD_MOVE && movecount > 0) {
 			Move tmpmove = movelist[0];
@@ -539,7 +555,7 @@ int Control(void* arg) {
 		if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) >= 0) break;
 	}
 	if (!running) return 0;
-	game_status = WAITING;
+	game_status = WAITING_FOR_START;
 	thrd_create(&send_fd, send_to_server, (void*)sock);
 	thrd_create(&recv_fd, recv_from_server, (void*)sock);
 	return 0;
