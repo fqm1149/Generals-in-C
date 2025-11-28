@@ -339,7 +339,7 @@ int recv_from_client(void* arg) {
 					continue;
 				}
 				printf("received message %d from client %d\n", (int)msgType, i);
-				if (msgType==UPLOAD_MOVE){
+				if (msgType == UPLOAD_MOVE){
 					recv(client_fd[i], &recvbuffer_move[i], sizeof(Move), MSG_WAITALL);
 					mtx_lock(&mutex);
 					movebuffer[i] = recvbuffer_move[i];
@@ -370,6 +370,14 @@ int recv_from_client(void* arg) {
 							SendSignal(SERVER_CMD, SHOW_MAP);
 						}
 					}
+				}
+				if (msgType == UPLOAD_NAME) {
+					char tmpname[20];
+					recv(client_fd[i], tmpname, 20, MSG_WAITALL);
+					mtx_lock(&mutex);
+					strcpy(setupdata.playername[i], tmpname);
+					mtx_unlock(&mutex);
+					SendSignal(SETUP_DATA, 0);
 				}
 			}
 		}

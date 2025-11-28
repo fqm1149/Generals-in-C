@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <raylib.h>
 #include <math.h>
 #include <stdlib.h>
@@ -155,6 +156,9 @@ int Renderer() {
 	bool moveable = false;//游玩逻辑的移动
 	int chosenblock[2] = { -1,-1 };
 	int lastchosenblock[2] = { -1,-1 };
+	bool mouseOnText = false;
+	int framecount = 0;//名字产生修改后60帧发送给server
+	bool needToRefreshName = false;
 
 	// 主游戏循环
 	while (!WindowShouldClose())    //关闭窗口或者按ESC键时返回true
@@ -311,12 +315,56 @@ int Renderer() {
 		}
 		if (game_status == WAITING_FOR_START) {
 			GetRank();
+			Rectangle textbox = (Rectangle){ width / 2 - 150,height / 2 - 60,300,50 };
 			BeginDrawing();
 			ClearBackground(background);
-			DrawTextAtCenter("Connected", width / 2, height / 2-60, 35, WHITE);
+			DrawTextAtCenter("Connected", width / 2, height / 2-90, 35, WHITE);
+			if (CheckCollisionPointRec(GetMousePosition(), textbox)) {
+				int letterCount = strlen(setupdata.playername[playernum - 1]);
+				SetMouseCursor(MOUSE_CURSOR_IBEAM);
+				DrawFilledRectangle(textbox.x, textbox.y, textbox.width, textbox.height, setupdata.playername[playernum-1], 35, GeneralsGreen, WHITE, BLACK);
+				int key = GetCharPressed();
+				while (key > 0)
+				{
+					if ((key >= 32) && (key <= 125) && letterCount <= 9)
+					{
+						setupdata.playername[playernum - 1][letterCount] = (char)key;
+						setupdata.playername[playernum - 1][letterCount + 1] = '\0'; 
+						letterCount++;
+						needToRefreshName = true;
+						framecount = 0;
+					}
+
+					key = GetCharPressed(); 
+				}
+
+				if (IsKeyPressed(KEY_BACKSPACE))
+				{
+					letterCount--;
+					if (letterCount < 0) letterCount = 0;
+					setupdata.playername[playernum - 1][letterCount] = '\0';
+					needToRefreshName = true;
+					framecount = 0;
+				}
+				
+			}
+			else {
+				SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+				DrawFilledRectangle((int)textbox.x, (int)textbox.y, (int)textbox.width, (int)textbox.height, setupdata.playername[playernum - 1], 35, DARKGRAY, WHITE, BLACK);
+			}
+			if (needToRefreshName) {
+				framecount++;
+				if (framecount >= 60) {
+					framecount = 0;
+					SendSignal(UPLOAD_NAME, 0);
+					needToRefreshName = 0;
+				}
+			}
+
+
 			Rectangle readyButton;
-			if (gameReady == 0) readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum,setupdata.totalnum), width / 2, height / 2 + 30, 35, BLACK, WHITE, GeneralsGreen);
-			else readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 30, 35, WHITE, GeneralsGreen, BLACK);
+			if (gameReady == 0) readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum,setupdata.totalnum), width / 2, height / 2 + 60, 35, BLACK, WHITE, GeneralsGreen);
+			else readyButton = DrawButtonAtCenter(TextFormat("Ready (%d/%d)", setupdata.readynum, setupdata.totalnum), width / 2, height / 2 + 60, 35, WHITE, GeneralsGreen, BLACK);
 			if (CheckCollisionPointRec(GetMousePosition(), readyButton)) {
 				if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 					gameReady ^= 1;
@@ -536,7 +584,16 @@ int send_to_server(void* arg) {
 			mtx_unlock(&mutex);
 			send(sock, &messageType, 1, 0);
 			send(sock, &currentCMD, 1, 0);
-		}else 	mtx_unlock(&mutex);
+		}
+		else if(messageType==UPLOAD_NAME){
+			char msgTpe = messageType;
+			char tmpname[20];
+			strcpy(tmpname, setupdata.playername[playernum - 1]);
+			mtx_unlock(&mutex);
+			send(sock, &messageType, 1, 0);
+			send(sock, tmpname, 20, 0);
+		}
+		else 	mtx_unlock(&mutex);
 
 	}
 	return 0;

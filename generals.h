@@ -3,7 +3,9 @@
 #define WIN32_LEAN_AND_MEAN     
 #define NOGDI                   
 #define NOUSER 
+#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <raylib.h>
@@ -45,6 +47,7 @@
 //client->server datatype:
 #define UPLOAD_MOVE 0
 #define CLIENT_CMD 1
+#define UPLOAD_NAME 2
 //client command type:
 #define CLIENT_EXIT 2
 #define CLIENT_READY 1
