@@ -59,6 +59,7 @@ int rank[8];//rank i 表示第i名是谁
 bool running = true;
 bool showmap = false;
 bool islose = false;
+bool rd_var = false;//搜索配套cond使用
 ServerInfo serverList[4];
 int detected_server_num;
 int chosen_serv_num = -1;//从0开始
@@ -106,7 +107,7 @@ int main(void)
 
 	// 请求线程优雅退出
 	running = false;
-	cnd_signal(&cond); // 唤醒可能等待的线程
+	cnd_broadcast(&cond); // 唤醒可能等待的线程
 
 	// 等待线程结束（如果已创建）
 	thrd_join(thrd_recv, NULL);
@@ -333,6 +334,7 @@ int Renderer() {
 			refreshButton = DrawButtonAtCenter("Refresh", width / 2, height / 2 - 120, 35, BLACK, WHITE, GeneralsGreen);
 			if (CheckCollisionPointRec(GetMousePosition(), refreshButton) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				NeedToRefreshServList = true;
+				rd_var = true;
 				cnd_signal(&cond);
 				EndDrawing();
 				continue;
@@ -659,7 +661,14 @@ int Control(void* arg) {
 		perror("setsockopt reuseaddr failed");
 	}
 
-	// 绑定到广播端口
+	
+	struct timeval tv;
+	tv.tv_sec = 2000;
+	tv.tv_usec = 0;
+	if (setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))<0) {
+		perror("setsockopt timeval failed");
+	}
+
 	memset(&listen_addr, 0, sizeof(listen_addr));
 	listen_addr.sin_family = AF_INET;
 	listen_addr.sin_port = htons(BROADCAST_PORT);
@@ -674,9 +683,9 @@ int Control(void* arg) {
 
 	printf("Client listening for broadcasts on port %d...\n", BROADCAST_PORT);
 
-	while (game_status == DISCONNECTED) {
+	while (chosen_serv_num < 0 && running) {
 		memset(buffer, 0, sizeof(buffer));
-		if (chosen_serv_num >= 0) break;
+		if (NeedToRefreshServList) { detected_server_num = 0; NeedToRefreshServList = 0; }
 		// 接收广播消息
 		int len = recvfrom(listen_fd, buffer, sizeof(buffer) - 1, 0, (struct sockaddr*)&serv_addr, &addr_len);
 
@@ -684,23 +693,18 @@ int Control(void* arg) {
 			buffer[len] = '\0';
 			inet_ntop(AF_INET, &(serv_addr.sin_addr), serverList[detected_server_num].ip, INET_ADDRSTRLEN);
 			GetServerInfo(buffer);
+			printf("now serverlist num is %d\n", detected_server_num);
 		}
+		else printf("received nothing\n");
 
-		if (NeedToRefreshServList) { detected_server_num = 0; NeedToRefreshServList = 0; }
+		//if (NeedToRefreshServList) { detected_server_num = 0; NeedToRefreshServList = 0; }
 		mtx_lock(&mutex);
-		cnd_wait(&cond, &mutex);
+		while (rd_var == false && chosen_serv_num<0 && running) cnd_wait(&cond, &mutex);
+		rd_var = false;
 		mtx_unlock(&mutex);
 	}
 
 	closesocket(listen_fd);
-
-
-
-
-
-
-
-
 	chosen_addr.sin_family = AF_INET;
 	chosen_addr.sin_port = htons((unsigned short)serverList[chosen_serv_num].port);
 	inet_pton(AF_INET, serverList[chosen_serv_num].ip, &chosen_addr.sin_addr);
