@@ -11,6 +11,7 @@
 #include <raylib.h>
 #pragma comment(lib, "ws2_32.lib")
 #define PORT 8029
+#define BROADCAST_PORT 8092
 
 #define MOUNTAIN -1
 #define CITY 1
@@ -108,5 +109,10 @@ typedef struct StatisticData {
 	int army[8];
 }StatisticData;
 
-
+typedef struct ServerInfo {
+	int ver;
+	int port;
+	char name[30];
+	char ip[22];
+}ServerInfo;
 #endif

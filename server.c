@@ -8,7 +8,7 @@
 #include <windows.h>
 #include <threads.h>
 
-thrd_t send_fd, recv_fd, logic_fd;
+thrd_t thrd_send, thrd_recv, thrd_game_logic, thrd_broadcast;
 mtx_t mutex;//数据读写保护（游戏逻辑部分）
 mtx_t mutex_netIO;//确保发送过程不受干扰 或者说更改重要大文件时不会产生发送动作
 mtx_t mutex_c;//确保进程间的通信完整
@@ -32,14 +32,17 @@ int playercount,alivecount,waitcount;
 Block** mapL1;
 Block* send_buffer;
 Move movebuffer[8] = { 0 };
-SOCKET listen_fd;
+SOCKET listen_fd,broadcast_fd;
 extern int** generatemap(int x, int y,int player_num);
 char isapplied[8] = { 0 };
 int roundn = 0;
-struct sockaddr_in address;
+int version = 251129;
+struct sockaddr_in address,broadcast_addr;
 int addrlen;
+int port = PORT;
 SetupData setupdata = { 0 };
 char messageType, currentCMD,game_status;
+char serverName[30];
 SOCKET wait_fd[8];
 void SendWait(SOCKET fd) {
 	char wms = SERVER_CMD;
@@ -67,8 +70,18 @@ void LazyColorSetup() {
 	setupdata.playercolor[2] = (Color){ 128,0,128,255 };
 	setupdata.playercolor[3] = (Color){ 250,140,1,255 };
 }
+void BroadCastInfo() {
+	while (running != 0) {
+		char buffer[1024];
+		snprintf(buffer, sizeof(buffer), "GEN_SERVER|%d|%s|%d",port,serverName,version);
+		sendto(broadcast_fd, buffer, strlen(buffer), 0, (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr));
+		printf("Broadcasted: %s\n", buffer);
+		Sleep(5000);
+	}
+}
 int main(void)
 {
+	strcpy(serverName, "Local Server");
 	mtx_init(&mutex, mtx_plain);
 	mtx_init(&mutex_c,mtx_plain);
 	mtx_init(&mutex_e,mtx_plain);
@@ -97,7 +110,7 @@ int main(void)
 	}
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(PORT);
+	address.sin_port = htons(port);
 	addrlen = sizeof(address);
 	while(bind(listen_fd, (struct sockaddr*)&address, addrlen) == SOCKET_ERROR) {
 		printf("bind failed:%d\n",WSAGetLastError());
@@ -107,8 +120,19 @@ int main(void)
 	setupdata.mapx = line;
 	setupdata.mapy = column;
 
-	thrd_create(&recv_fd, recv_from_client, client_fd);
-	thrd_create(&send_fd, send_to_client, client_fd);
+	thrd_create(&thrd_recv, recv_from_client, client_fd);
+	thrd_create(&thrd_send, send_to_client, client_fd);
+
+	broadcast_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	setsockopt(broadcast_fd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+	memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+	broadcast_addr.sin_family = AF_INET;
+	broadcast_addr.sin_port = htons(BROADCAST_PORT);
+	broadcast_addr.sin_addr.s_addr = INADDR_BROADCAST;
+
+	thrd_create(&thrd_broadcast, BroadCastInfo, NULL);
+
+
 
 	// 等待退出信号
 	mtx_lock(&mutex_e);
@@ -121,9 +145,9 @@ int main(void)
 	cnd_signal(&cond_exit);
 
 	// wait for threads
-	thrd_join(recv_fd, &result);
-	thrd_join(logic_fd, &result);
-	thrd_join(send_fd, &result);
+	thrd_join(thrd_recv, &result);
+	thrd_join(thrd_game_logic, &result);
+	thrd_join(thrd_send, &result);
 
 	printf("some client disconnected! Press any key to end game\n(Don't close the terminal window directly)\n");
 	system("pause");
@@ -232,7 +256,7 @@ int send_to_client(void* arg) {
 				setupdata.readynum = 0;
 				alivecount = playercount;
 				game_status = START;
-				thrd_create(&logic_fd, logic_process, NULL);
+				thrd_create(&thrd_game_logic, logic_process, NULL);
 				}
 			if (temp_currentCMD == SHOW_MAP) {
 				game_status = WAITING_FOR_START;

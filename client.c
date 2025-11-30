@@ -31,6 +31,7 @@ char isapplied = 0;
 char messageType,currentCMD;
 bool NeedToSendData = true;
 bool NeedToRefreshPage = true;
+bool NeedToRefreshServList;
 cnd_t cond;
 SetupData setupdata;
 Texture tmountain;
@@ -44,7 +45,7 @@ int column;
 Move movelist[300] = { 0 };
 int movecount = 0;
 Block** mapL1;
-thrd_t recv_fd,send_fd,ctrl_fd;
+thrd_t thrd_recv,thrd_send,thrd_ctrl;
 int roundn = 1;
 int playernum;//从1开始
 Block* mapbuffer;
@@ -58,11 +59,33 @@ int rank[8];//rank i 表示第i名是谁
 bool running = true;
 bool showmap = false;
 bool islose = false;
+ServerInfo serverList[4];
+int detected_server_num;
+int chosen_serv_num = -1;//从0开始
 void SendSignal(char msgtype, char cmd) {
 	messageType = msgtype;
 	currentCMD = cmd;
 	NeedToSendData = true;
 	cnd_signal(&cond);
+}
+int GetServerInfo(const char* buffer) {
+	char* token;
+	char copy[1024];
+	strcpy(copy, buffer);
+	// 格式: "GEN_SERVER|端口|服务器名|版本"
+	token = strtok(copy, "|");
+	if (token && strcmp(token, "GEN_SERVER") == 0) {
+		token = strtok(NULL, "|");
+		if (token) serverList[detected_server_num].port = atoi(token);
+		token = strtok(NULL, "|");
+		if (token) strncpy(serverList[detected_server_num].name, token, sizeof(serverList[detected_server_num].name) - 1);
+		token = strtok(NULL, "|");
+		if (token) serverList[detected_server_num].ver = atoi(token);
+		for (int i = 0; i < detected_server_num; i++) if (strcmp(serverList[i].ip, serverList[detected_server_num].ip) == 0) return 0;
+		detected_server_num++;
+		return 1;
+	}
+	return 0;
 }
 int main(void)
 {
@@ -75,7 +98,8 @@ int main(void)
 	int wsares = WSAStartup(MAKEWORD(2, 2), &wsadata);
 	if (wsares != 0) return 1;
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-	thrd_create(&ctrl_fd, Control, (void*)sock);
+
+	thrd_create(&thrd_ctrl, Control, (void*)sock);
 
 	Renderer();
 	closesocket(sock);
@@ -85,9 +109,9 @@ int main(void)
 	cnd_signal(&cond); // 唤醒可能等待的线程
 
 	// 等待线程结束（如果已创建）
-	thrd_join(recv_fd, NULL);
-	thrd_join(send_fd, NULL);
-	thrd_join(ctrl_fd, NULL);
+	thrd_join(thrd_recv, NULL);
+	thrd_join(thrd_send, NULL);
+	thrd_join(thrd_ctrl, NULL);
 
 	// 清理战场
 	if (game_status!=WAITING_FOR_START && game_status!=WAITING_FOR_END) {
@@ -159,6 +183,7 @@ int Renderer() {
 	bool mouseOnText = false;
 	int framecount = 0;//名字产生修改后60帧发送给server
 	bool needToRefreshName = false;
+	Rectangle connectButton[4],refreshButton;
 
 	// 主游戏循环
 	while (!WindowShouldClose())    //关闭窗口或者按ESC键时返回true
@@ -304,7 +329,23 @@ int Renderer() {
 			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { tryconnect = 1; cnd_signal(&cond); }
 			BeginDrawing();
 			ClearBackground(background);
-			DrawTextAtCenter("Disconnected", width / 2, height / 2-60, 35, WHITE);
+			DrawTextAtCenter("Disconnected", width / 2, height / 2-220, 35, WHITE);
+			refreshButton = DrawButtonAtCenter("Refresh", width / 2, height / 2 - 120, 35, BLACK, WHITE, GeneralsGreen);
+			if (CheckCollisionPointRec(GetMousePosition(), refreshButton) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				NeedToRefreshServList = true;
+				cnd_signal(&cond);
+				EndDrawing();
+				continue;
+			}
+			for (int i = 0;i < detected_server_num; i++) {
+				DrawRectangle(width / 2 - 300, height / 2 - 60 + 120 * i, 600, 120, WHITE);
+				DrawText(TextFormat("%s", serverList[i].name), width / 2 - 270, height / 2 - 50 + 120 * i, 50, BLACK);
+				DrawText(TextFormat("%s:%d", serverList[i].ip, serverList[i].port), width / 2 - 270, height / 2 + 120 * i, 30, GRAY);
+				connectButton[i] = DrawButtonAtCenter("Connect", width / 2 + 250, height / 2 + 120 * i, 35, WHITE, GeneralsGreen, BLACK);
+				if (CheckCollisionPointRec(GetMousePosition(), connectButton[i]) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+					chosen_serv_num = i; cnd_signal(&cond);
+				}
+			}
 			EndDrawing();
 		}
 		if (game_status == WAITING_FOR_END) {
@@ -600,21 +641,74 @@ int send_to_server(void* arg) {
 }
 int Control(void* arg) {
 	SOCKET sock = (SOCKET)arg;
-	struct sockaddr_in serv_addr;
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(PORT);
-	inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
-	while (running) {
-		mtx_lock(&mutex);
-		while (tryconnect == 0 && running) cnd_wait(&cond, &mutex);
-		mtx_unlock(&mutex);
-		if (!running) break;
-		if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) >= 0) break;
+	struct sockaddr_in serv_addr, listen_addr, chosen_addr;
+	SOCKET listen_fd;
+	socklen_t addr_len = sizeof(listen_addr);
+	char buffer[1024];
+	int reuse_enable = 1;
+
+	// 创建UDP socket
+	if ((listen_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		perror("socket creation failed");
+		exit(EXIT_FAILURE);
 	}
+
+	// 设置地址重用
+	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR,
+		&reuse_enable, sizeof(reuse_enable)) < 0) {
+		perror("setsockopt reuseaddr failed");
+	}
+
+	// 绑定到广播端口
+	memset(&listen_addr, 0, sizeof(listen_addr));
+	listen_addr.sin_family = AF_INET;
+	listen_addr.sin_port = htons(BROADCAST_PORT);
+	listen_addr.sin_addr.s_addr = INADDR_ANY;
+
+	if (bind(listen_fd, (struct sockaddr*)&listen_addr,
+		sizeof(listen_addr)) < 0) {
+		perror("bind failed");
+		close(listen_fd);
+		exit(EXIT_FAILURE);
+	}
+
+	printf("Client listening for broadcasts on port %d...\n", BROADCAST_PORT);
+
+	while (game_status == DISCONNECTED) {
+		memset(buffer, 0, sizeof(buffer));
+		if (chosen_serv_num >= 0) break;
+		// 接收广播消息
+		int len = recvfrom(listen_fd, buffer, sizeof(buffer) - 1, 0, (struct sockaddr*)&serv_addr, &addr_len);
+
+		if (len > 0) {
+			buffer[len] = '\0';
+			inet_ntop(AF_INET, &(serv_addr.sin_addr), serverList[detected_server_num].ip, INET_ADDRSTRLEN);
+			GetServerInfo(buffer);
+		}
+
+		if (NeedToRefreshServList) { detected_server_num = 0; NeedToRefreshServList = 0; }
+		mtx_lock(&mutex);
+		cnd_wait(&cond, &mutex);
+		mtx_unlock(&mutex);
+	}
+
+	closesocket(listen_fd);
+
+
+
+
+
+
+
+
+	chosen_addr.sin_family = AF_INET;
+	chosen_addr.sin_port = htons((unsigned short)serverList[chosen_serv_num].port);
+	inet_pton(AF_INET, serverList[chosen_serv_num].ip, &chosen_addr.sin_addr);
+	connect(sock, (struct sockaddr*)&chosen_addr, sizeof(chosen_addr));
 	if (!running) return 0;
 	game_status = WAITING_FOR_START;
-	thrd_create(&send_fd, send_to_server, (void*)sock);
-	thrd_create(&recv_fd, recv_from_server, (void*)sock);
+	thrd_create(&thrd_send, send_to_server, (void*)sock);
+	thrd_create(&thrd_recv, recv_from_server, (void*)sock);
 	return 0;
 }
 
