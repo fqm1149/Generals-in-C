@@ -12,6 +12,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #define PORT 8029
 #define BROADCAST_PORT 8092
+#define DEFAULT_SERVER_PORT 12345
 
 #define MOUNTAIN -1
 #define CITY 1

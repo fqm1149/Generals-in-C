@@ -63,11 +63,42 @@ bool rd_var = false;//搜索配套cond使用
 ServerInfo serverList[4];
 int detected_server_num;
 int chosen_serv_num = -1;//从0开始
+char domain_input[128] = ""; // 域名输入框内容
+bool domain_input_active = false; // 是否激活输入框
+bool name_input_active = false;
 void SendSignal(char msgtype, char cmd) {
 	messageType = msgtype;
 	currentCMD = cmd;
 	NeedToSendData = true;
 	cnd_signal(&cond);
+}
+// 域名解析为IP地址
+int resolve_domain(const char* domain, char* ip_out, size_t ip_out_size) {
+	struct addrinfo hints = { 0 }, * res = NULL;
+	hints.ai_family = AF_INET;
+	if (getaddrinfo(domain, NULL, &hints, &res) != 0 || res == NULL) return 0;
+	struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
+	inet_ntop(AF_INET, &addr->sin_addr, ip_out, (DWORD)ip_out_size);
+	freeaddrinfo(res);
+	return 1;
+}
+// 解析 "domain:port" 格式，返回ip和端口
+int parse_domain_and_port(const char* input, char* ip_out, size_t ip_out_size, int* port_out) {
+	char domain[128] = "";
+	const char* colon = strchr(input, ':');
+	if (colon) {
+		size_t domain_len = colon - input;
+		if (domain_len >= sizeof(domain)) domain_len = sizeof(domain) - 1;
+		strncpy(domain, input, domain_len);
+		domain[domain_len] = '\0';
+		*port_out = atoi(colon + 1);
+	}
+	else {
+		strncpy(domain, input, sizeof(domain) - 1);
+		domain[sizeof(domain) - 1] = '\0';
+		*port_out = DEFAULT_SERVER_PORT; // 可选：无端口时默认
+	}
+	return resolve_domain(domain, ip_out, ip_out_size);
 }
 int GetServerInfo(const char* buffer) {
 	char* token;
@@ -348,6 +379,63 @@ int Renderer() {
 					chosen_serv_num = i; cnd_signal(&cond);
 				}
 			}
+			// 域名输入框
+			Rectangle domainBox = { width / 2 - 300, height / 2 + 120 * detected_server_num + 20, 600, 50 };
+			DrawRectangleRec(domainBox, WHITE);
+			if (CheckCollisionPointRec(GetMousePosition(), domainBox)) { DrawRectangleLinesEx(domainBox, 2, GeneralsGreen); SetMouseCursor(MOUSE_CURSOR_IBEAM); }
+			else { DrawRectangleLinesEx(domainBox, 2, BLACK); SetMouseCursor(MOUSE_CURSOR_DEFAULT); }
+			DrawText("Connect by domain:port", domainBox.x, domainBox.y - 35, 25, GRAY);
+
+			// 输入处理
+			if (CheckCollisionPointRec(GetMousePosition(), domainBox) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				domain_input_active = true;
+			}
+			else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				domain_input_active = false;
+			}
+			if (domain_input_active) {
+				int key = GetCharPressed();
+				int len = strlen(domain_input);
+				while (key > 0) {
+					if (key >= 32 && key <= 125 && len < 127) {
+						domain_input[len++] = (char)key;
+						domain_input[len] = '\0';
+					}
+					key = GetCharPressed();
+				}
+				if (IsKeyPressed(KEY_BACKSPACE) && len > 0) {
+					domain_input[--len] = '\0';
+				}
+			}
+
+			// 绘制输入内容
+			DrawText(domain_input, domainBox.x + 10, domainBox.y + 10, 30, BLACK);
+
+			// 闪烁光标
+			if (domain_input_active) {
+				int text_width = MeasureText(domain_input, 30);
+				// 每30帧闪烁一次
+				if ((GetTime() * 2.0f) - (int)(GetTime() * 2.0f) < 0.5f) {
+					DrawRectangle(domainBox.x + 10 + text_width, domainBox.y + 12, 2, 26, BLACK);
+				}
+			}
+
+			// 连接按钮
+			Rectangle domainConnectBtn = DrawButtonAtCenter("Connect", width / 2 + 250, domainBox.y + 25, 35, WHITE, GeneralsGreen, BLACK);
+			if (CheckCollisionPointRec(GetMousePosition(), domainConnectBtn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				char ip[32] = "";
+				int port = 0;
+				if (parse_domain_and_port(domain_input, ip, sizeof(ip), &port)) {
+					strncpy(serverList[detected_server_num].ip, ip, sizeof(serverList[detected_server_num].ip) - 1);
+					serverList[detected_server_num].port = port;
+					strcpy(serverList[detected_server_num].name, domain_input);
+					chosen_serv_num = detected_server_num;
+					cnd_signal(&cond);
+				}
+				else {
+					DrawTextAtCenter("Domain resolve failed!", width / 2, domainBox.y + 80, 25, RED);
+				}
+			}
 			EndDrawing();
 		}
 		if (game_status == WAITING_FOR_END) {
@@ -362,23 +450,44 @@ int Renderer() {
 			BeginDrawing();
 			ClearBackground(background);
 			DrawTextAtCenter("Connected", width / 2, height / 2-90, 35, WHITE);
-			if (CheckCollisionPointRec(GetMousePosition(), textbox)) {
-				int letterCount = strlen(setupdata.playername[playernum - 1]);
+
+
+
+
+			if (CheckCollisionPointRec(GetMousePosition(), textbox) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				name_input_active = true;
+			}
+			else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				name_input_active = false;
+			}
+
+
+
+			if (CheckCollisionPointRec(GetMousePosition(), textbox)){
+				
 				SetMouseCursor(MOUSE_CURSOR_IBEAM);
 				DrawFilledRectangle(textbox.x, textbox.y, textbox.width, textbox.height, setupdata.playername[playernum-1], 35, GeneralsGreen, WHITE, BLACK);
+			}
+			else {
+
+				SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+				DrawFilledRectangle((int)textbox.x, (int)textbox.y, (int)textbox.width, (int)textbox.height, setupdata.playername[playernum - 1], 35, DARKGRAY, WHITE, BLACK);
+			}
+			if (name_input_active) {
+				int letterCount = strlen(setupdata.playername[playernum - 1]);
 				int key = GetCharPressed();
 				while (key > 0)
 				{
 					if ((key >= 32) && (key <= 125) && letterCount <= 9)
 					{
 						setupdata.playername[playernum - 1][letterCount] = (char)key;
-						setupdata.playername[playernum - 1][letterCount + 1] = '\0'; 
+						setupdata.playername[playernum - 1][letterCount + 1] = '\0';
 						letterCount++;
 						needToRefreshName = true;
 						framecount = 0;
 					}
 
-					key = GetCharPressed(); 
+					key = GetCharPressed();
 				}
 
 				if (IsKeyPressed(KEY_BACKSPACE))
@@ -389,12 +498,13 @@ int Renderer() {
 					needToRefreshName = true;
 					framecount = 0;
 				}
-				
+				int text_width = MeasureText(setupdata.playername[playernum - 1], 35);
+				// 每30帧闪烁一次
+				if ((GetTime() * 2.0f) - (int)(GetTime() * 2.0f) < 0.5f) {
+					DrawRectangle(width / 2 + text_width / 2 + 10, textbox.y + 12, 3, 26, BLACK);
+				}
 			}
-			else {
-				SetMouseCursor(MOUSE_CURSOR_DEFAULT);
-				DrawFilledRectangle((int)textbox.x, (int)textbox.y, (int)textbox.width, (int)textbox.height, setupdata.playername[playernum - 1], 35, DARKGRAY, WHITE, BLACK);
-			}
+			
 			if (needToRefreshName) {
 				framecount++;
 				if (framecount >= 60) {
