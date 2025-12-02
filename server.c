@@ -475,8 +475,8 @@ int logic_process(void* arg) {
 		//Ôö±ø
 		for (int i1 = 1; i1 <= line; i1++) for (int j1 = 1; j1 <= column; j1++) {
 			if (mapL1[i1 - 1][j1 - 1].type == CROWN) mapL1[i1 - 1][j1 - 1].num++;
-			if (mapL1[i1 - 1][j1 - 1].type == CITY && mapL1[i1 - 1][j1 - 1].owner != 0) mapL1[i1 - 1][j1 - 1].num++;
-			if (roundn % 25 == 0) if (mapL1[i1 - 1][j1 - 1].owner != 0) mapL1[i1 - 1][j1 - 1].num++;
+			if (mapL1[i1 - 1][j1 - 1].type == CITY && mapL1[i1 - 1][j1 - 1].owner > 0) mapL1[i1 - 1][j1 - 1].num++;
+			if (roundn % 25 == 0) if (mapL1[i1 - 1][j1 - 1].owner > 0) mapL1[i1 - 1][j1 - 1].num++;
 		}
 		//´¦ÀíMove
 		for (int i = 0; i < playercount; i++) {
@@ -495,6 +495,9 @@ int logic_process(void* arg) {
 }
 void OwnerReplace(int loser, int winner) {
 	for (int i1 = 1; i1 <= line; i1++) for (int j1 = 1; j1 <= column; j1++) {
-		if (mapL1[i1 - 1][j1 - 1].owner == loser) mapL1[i1 - 1][j1 - 1].owner = winner;
+		if (mapL1[i1 - 1][j1 - 1].owner == loser) {
+			mapL1[i1 - 1][j1 - 1].owner = winner;
+			mapL1[i1 - 1][j1 - 1].num = (mapL1[i1 - 1][j1 - 1].num + 1) / 2;
+		}
 	}
 }

@@ -386,7 +386,6 @@ int Renderer() {
 			else { DrawRectangleLinesEx(domainBox, 2, BLACK); SetMouseCursor(MOUSE_CURSOR_DEFAULT); }
 			DrawText("Connect by domain:port", domainBox.x, domainBox.y - 35, 25, GRAY);
 
-			// 输入处理
 			if (CheckCollisionPointRec(GetMousePosition(), domainBox) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				domain_input_active = true;
 			}
@@ -408,10 +407,7 @@ int Renderer() {
 				}
 			}
 
-			// 绘制输入内容
 			DrawText(domain_input, domainBox.x + 10, domainBox.y + 10, 30, BLACK);
-
-			// 闪烁光标
 			if (domain_input_active) {
 				int text_width = MeasureText(domain_input, 30);
 				// 每30帧闪烁一次
@@ -419,8 +415,6 @@ int Renderer() {
 					DrawRectangle(domainBox.x + 10 + text_width, domainBox.y + 12, 2, 26, BLACK);
 				}
 			}
-
-			// 连接按钮
 			Rectangle domainConnectBtn = DrawButtonAtCenter("Connect", width / 2 + 250, domainBox.y + 25, 35, WHITE, GeneralsGreen, BLACK);
 			if (CheckCollisionPointRec(GetMousePosition(), domainConnectBtn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				char ip[32] = "";
@@ -452,24 +446,17 @@ int Renderer() {
 			DrawTextAtCenter("Connected", width / 2, height / 2-90, 35, WHITE);
 
 
-
-
 			if (CheckCollisionPointRec(GetMousePosition(), textbox) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				name_input_active = true;
 			}
 			else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				name_input_active = false;
 			}
-
-
-
 			if (CheckCollisionPointRec(GetMousePosition(), textbox)){
-				
 				SetMouseCursor(MOUSE_CURSOR_IBEAM);
 				DrawFilledRectangle(textbox.x, textbox.y, textbox.width, textbox.height, setupdata.playername[playernum-1], 35, GeneralsGreen, WHITE, BLACK);
 			}
 			else {
-
 				SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 				DrawFilledRectangle((int)textbox.x, (int)textbox.y, (int)textbox.width, (int)textbox.height, setupdata.playername[playernum - 1], 35, DARKGRAY, WHITE, BLACK);
 			}
@@ -486,7 +473,6 @@ int Renderer() {
 						needToRefreshName = true;
 						framecount = 0;
 					}
-
 					key = GetCharPressed();
 				}
 
@@ -806,8 +792,6 @@ int Control(void* arg) {
 			printf("now serverlist num is %d\n", detected_server_num);
 		}
 		else printf("received nothing\n");
-
-		//if (NeedToRefreshServList) { detected_server_num = 0; NeedToRefreshServList = 0; }
 		mtx_lock(&mutex);
 		while (rd_var == false && chosen_serv_num<0 && running) cnd_wait(&cond, &mutex);
 		rd_var = false;
