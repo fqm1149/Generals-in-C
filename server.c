@@ -20,9 +20,9 @@ int recv_from_client(void* arg);
 int logic_process(void* arg);
 int MoveOneStep(Move move);
 void OwnerReplace(int loser, int winner);
-
+void Renderer();
 bool running = 1;
-
+int roundTime = 1000;
 bool NeedToSendData = false;
 int condition_exit = 0;
 int line = LINE;
@@ -44,6 +44,19 @@ SetupData setupdata = { 0 };
 char messageType, currentCMD,game_status;
 char serverName[30];
 SOCKET wait_fd[8];
+Font font;
+void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color);
+void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor);
+Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textColor, Color buttonColor, Color shaderColor) {
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	Rectangle button = { x - textsize.x / 2 - 30,y - textsize.y / 2 - 20,textsize.x + 60,textsize.y + 40 };
+	Rectangle shader = { x - textsize.x / 2 - 25,y - textsize.y / 2 - 15,textsize.x + 60,textsize.y + 40 };
+	DrawRectangleRec(shader, shaderColor);
+	DrawRectangleRec(button, buttonColor);
+	DrawTextAtCenter(text, x, y, fontsize, textColor);
+	return button;
+}
+extern char* GetBotDLL();
 void SendWait(SOCKET fd) {
 	char wms = SERVER_CMD;
 	char wcmd = WAIT_FOR_END;
@@ -134,10 +147,7 @@ int main(void)
 
 
 
-	// 等待退出信号
-	mtx_lock(&mutex_e);
-	while (condition_exit == 0) cnd_wait(&cond_exit, &mutex_e);
-	mtx_unlock(&mutex_e);
+	Renderer();
 	printf("sending exit signal\n");
 	// 请求线程退出
 	running = false;
@@ -150,7 +160,6 @@ int main(void)
 	thrd_join(thrd_send, &result);
 
 	printf("some client disconnected! Press any key to end game\n(Don't close the terminal window directly)\n");
-	system("pause");
 
 
 	for (int i = 0; i < playercount;i++) closesocket(client_fd[i]);
@@ -225,6 +234,7 @@ int send_to_client(void* arg) {
 			}
 			
 			if (temp_currentCMD == GAME_READY) {
+				game_status = READY;
 				srand((unsigned int)time(NULL));
 				int** map = generatemap(line, column, playercount);
 				mapL1 = malloc(line * sizeof(Block*));
@@ -489,7 +499,7 @@ int logic_process(void* arg) {
 		
 		mtx_unlock(&mutex);
 		SendSignal(MAP_DATA, 0);
-		Sleep(500);
+		Sleep(roundTime);
 	}
 	return 0;
 }
@@ -500,4 +510,189 @@ void OwnerReplace(int loser, int winner) {
 			mapL1[i1 - 1][j1 - 1].num = (mapL1[i1 - 1][j1 - 1].num + 1) / 2;
 		}
 	}
+}
+void Renderer() {
+	int screenWidth = 1440;
+	int screenHeight = 1440;
+	float cursorTimer = 0.0f;
+	bool cursorVisible = true;
+	SetConfigFlags(FLAG_MSAA_4X_HINT);
+	SetTraceLogLevel(LOG_NONE);
+	InitWindow(screenWidth, screenHeight, "Generals_server");
+	SetWindowState(FLAG_WINDOW_RESIZABLE);
+	SetTargetFPS(60);
+	Color background = { 34,34,34,255 };
+	Color GeneralsGreen = { 0,128,128,255 };
+	// 输入框相关变量
+	int inputLine = line, inputColumn = column, inputRoundTime = roundTime;
+	char bufLine[8], bufColumn[8], bufRoundTime[8];
+	snprintf(bufLine, sizeof(bufLine), "%d", inputLine);
+	snprintf(bufColumn, sizeof(bufColumn), "%d", inputColumn);
+	snprintf(bufRoundTime, sizeof(bufRoundTime), "%d", inputRoundTime);
+
+	int focus = 0; // 0: none, 1: line, 2: column, 3: roundtime
+	int focusRealTime = 0;
+	if (font.texture.id == 0) font = GetFontDefault();
+	while (!WindowShouldClose()) {
+		screenWidth = GetScreenWidth();
+		screenHeight = GetScreenHeight();
+		BeginDrawing();
+		cursorTimer += GetFrameTime();
+		if (cursorTimer >= 0.5f) {
+			cursorVisible = !cursorVisible;
+			cursorTimer = 0.0f;
+		}
+		ClearBackground(background);
+
+		if (game_status == WAITING_FOR_START) {
+			// 显示已连接玩家
+			Vector2 mouse = GetMousePosition();
+			int boxWidth = 400, boxHeight = 80;
+			int startY = screenHeight / 2 - (playercount * boxHeight) / 2;
+			for (int i = 0; i < playercount; i++) {
+				int x = (screenWidth - boxWidth) / 2;
+				int y = startY + i * boxHeight;
+				DrawFilledRectangle(x, y, boxWidth, boxHeight, setupdata.playername[i], 35, BLACK, setupdata.playercolor[i], WHITE);
+			}
+
+			// 输入框布局
+			int inputBoxW = 300, inputBoxH = 70, inputGap = 40;
+			int inputStartY = startY + playercount * boxHeight + 80;
+			int inputStartX = (screenWidth - (inputBoxW * 3 + inputGap * 2)) / 2;
+
+			if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX, inputStartY, inputBoxW, inputBoxH })) focusRealTime = 1;
+			else if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX + inputBoxW + inputGap, inputStartY, inputBoxW, inputBoxH })) focusRealTime = 2;
+			else if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX + (inputBoxW + inputGap) * 2, inputStartY, inputBoxW, inputBoxH })) focusRealTime = 3;
+			else focusRealTime = 0;
+
+			if (focusRealTime) SetMouseCursor(MOUSE_CURSOR_IBEAM);
+			else SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+
+			// line输入框
+			DrawRectangle(inputStartX, inputStartY, inputBoxW, inputBoxH, WHITE);
+			DrawRectangleLinesEx((Rectangle) { inputStartX, inputStartY, inputBoxW, inputBoxH }, 2, focusRealTime == 1 ? GeneralsGreen : BLACK);
+			DrawText("Line", inputStartX + 10, inputStartY + 8, 35, GRAY);
+			DrawText(bufLine, inputStartX + 20+MeasureText("Line",35), inputStartY + 8, 35, BLACK);
+			if (focus == 1 && cursorVisible) {
+				int tx = inputStartX + 20 + MeasureText("Line", 35) + MeasureText(bufLine, 35);
+				int ty = inputStartY + 8;
+				DrawRectangle(tx, ty, 2, 28, BLACK);
+			}
+			// column输入框
+			DrawRectangle(inputStartX + inputBoxW + inputGap, inputStartY, inputBoxW, inputBoxH, WHITE);
+			DrawRectangleLinesEx((Rectangle) { inputStartX + inputBoxW + inputGap, inputStartY, inputBoxW, inputBoxH }, 2, focusRealTime == 2 ? GeneralsGreen : BLACK);
+			DrawText("Column", inputStartX + inputBoxW + inputGap + 10, inputStartY + 8, 35, GRAY);
+			DrawText(bufColumn, inputStartX + inputBoxW + inputGap + 20+MeasureText("Column",35), inputStartY + 8, 35, BLACK);
+			if (focus == 2 && cursorVisible) {
+				int tx = inputStartX + inputBoxW + inputGap + 20 + MeasureText("Column",35) + MeasureText(bufColumn, 35);
+				int ty = inputStartY + 8;
+				DrawRectangle(tx, ty, 2, 28, BLACK);
+			}
+			// round time输入框
+			DrawRectangle(inputStartX + (inputBoxW + inputGap) * 2, inputStartY, inputBoxW, inputBoxH, WHITE);
+			DrawRectangleLinesEx((Rectangle) { inputStartX + (inputBoxW + inputGap) * 2, inputStartY, inputBoxW, inputBoxH },2, focusRealTime == 3 ? GeneralsGreen : BLACK);
+			DrawText("Round(ms)", inputStartX + (inputBoxW + inputGap) * 2 + 10, inputStartY + 8, 35, GRAY);
+			DrawText(bufRoundTime, inputStartX + (inputBoxW + inputGap) * 2 + 20+MeasureText("Round(ms)",35), inputStartY + 8,35, BLACK);
+			if (focus == 3 && cursorVisible) {
+				int tx = inputStartX + (inputBoxW + inputGap) * 2 + 20 + MeasureText("Round(ms)", 35) + MeasureText(bufRoundTime, 35);
+				int ty = inputStartY + 8;
+				DrawRectangle(tx, ty, 2, 28, BLACK);
+			}
+			// 输入框焦点切换与内容编辑
+			if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+				if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX, inputStartY, inputBoxW, inputBoxH })) focus = 1;
+				else if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX + inputBoxW + inputGap, inputStartY, inputBoxW, inputBoxH })) focus = 2;
+				else if (CheckCollisionPointRec(mouse, (Rectangle) { inputStartX + (inputBoxW + inputGap) * 2, inputStartY, inputBoxW, inputBoxH })) focus = 3;
+				else focus = 0;
+			}
+			int key = GetCharPressed();
+			if (focus == 1 && key >= '0' && key <= '9' && strlen(bufLine) < 6) {
+				int len = strlen(bufLine);
+				bufLine[len] = (char)key;
+				bufLine[len + 1] = '\0';
+			}
+			if (focus == 2 && key >= '0' && key <= '9' && strlen(bufColumn) < 6) {
+				int len = strlen(bufColumn);
+				bufColumn[len] = (char)key;
+				bufColumn[len + 1] = '\0';
+			}
+			if (focus == 3 && key >= '0' && key <= '9' && strlen(bufRoundTime) < 6) {
+				int len = strlen(bufRoundTime);
+				bufRoundTime[len] = (char)key;
+				bufRoundTime[len + 1] = '\0';
+			}
+			if (IsKeyPressed(KEY_BACKSPACE)) {
+				if (focus == 1 && strlen(bufLine) > 0) bufLine[strlen(bufLine) - 1] = '\0';
+				if (focus == 2 && strlen(bufColumn) > 0) bufColumn[strlen(bufColumn) - 1] = '\0';
+				if (focus == 3 && strlen(bufRoundTime) > 0) bufRoundTime[strlen(bufRoundTime) - 1] = '\0';
+			}
+			// 回车应用
+			if (IsKeyPressed(KEY_ENTER)) {
+				if (focus == 1 && strlen(bufLine) > 0) {
+					line = atoi(bufLine); setupdata.mapx = line;
+					SendSignal(SETUP_DATA, 0);
+				}
+				if (focus == 2 && strlen(bufColumn) > 0) {
+					column = atoi(bufColumn);
+					setupdata.mapy = column;
+					SendSignal(SETUP_DATA, 0);
+				}
+				if (focus == 3 && strlen(bufRoundTime) > 0) { inputRoundTime = atoi(bufRoundTime); 
+				roundTime = inputRoundTime;
+				}
+				focus = 0;
+			}
+			Rectangle button_add_bot = DrawButtonAtCenter("Add Bot", screenWidth / 2, inputStartY + 300, 35, BLACK, WHITE, GeneralsGreen);
+			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, button_add_bot)) {
+				char botpath[MAX_PATH];
+				strcpy(botpath, GetBotDLL());
+			}
+
+
+
+
+		}
+
+		if (game_status == READY) {
+			DrawTextAtCenter("All Ready, Starting...", screenWidth / 2, screenHeight / 2, 35, WHITE);
+		}
+
+		if (game_status == START) {
+			// gaming横向居中纵向靠顶
+			int boxW = 400, boxH = 80;
+			int x = (screenWidth - boxW) / 2, y = 40;
+			DrawRectangle(x, y, boxW, boxH, (Color) { 255, 255, 255, 255 });
+			DrawRectangleLines(x, y, boxW, boxH, (Color) { 180, 180, 180, 255 });
+			DrawText("Gaming", x + (boxW - MeasureText("Gaming", 48)) / 2, y + 16, 48, (Color) { 40, 40, 40, 255 });
+
+			// 等待加入
+			if (waitcount > 0) {
+				int boxW2 = 400, boxH2 = 60;
+				int x2 = (screenWidth - boxW2) / 2, y2 = y + boxH + 30;
+				DrawRectangle(x2, y2, boxW2, boxH2, (Color) { 255, 255, 255, 255 });
+				DrawRectangleLines(x2, y2, boxW2, boxH2, (Color) { 180, 180, 180, 255 });
+				char buf[64];
+				snprintf(buf, sizeof(buf), "Waiting to join: %d", waitcount);
+				DrawText(buf, x2 + (boxW2 - MeasureText(buf, 32)) / 2, y2 + 14, 32, (Color) { 40, 40, 40, 255 });
+			}
+		}
+
+		EndDrawing();
+	}
+	CloseWindow();
+}
+void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color) {
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	DrawTextEx(font, text, (Vector2) { (int)(x - textsize.x / 2), (int)(y - textsize.y / 2) }, fontsize, TEXT_SPACING, color);
+}
+void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor) {
+	Rectangle background = { startx,starty,width,height };
+	DrawRectangleRec(background, fillColor);
+	DrawRectangleLinesEx(background, TABLE_LINE_WIDTH, lineColor);
+	Vector2 textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	while (textsize.x > width) {
+		fontsize--;
+		textsize = MeasureTextEx(font, text, fontsize, TEXT_SPACING);
+	}
+	DrawTextAtCenter(text, startx + width / 2, starty + height / 2, fontsize, textcolor);
 }
