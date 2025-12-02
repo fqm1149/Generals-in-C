@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "client", "basicmap.vcxproj"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "server", "..\server\server.vcxproj", "{00E9AA1C-0CD5-4E04-8D1A-745322B362E1}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BotExample", "..\BotExample\BotExample.vcxproj", "{AD01129E-D68B-4430-8128-C0C641980278}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -31,6 +33,14 @@ Global
 		{00E9AA1C-0CD5-4E04-8D1A-745322B362E1}.Release|x64.Build.0 = Release|x64
 		{00E9AA1C-0CD5-4E04-8D1A-745322B362E1}.Release|x86.ActiveCfg = Release|Win32
 		{00E9AA1C-0CD5-4E04-8D1A-745322B362E1}.Release|x86.Build.0 = Release|Win32
+		{AD01129E-D68B-4430-8128-C0C641980278}.Debug|x64.ActiveCfg = Debug|x64
+		{AD01129E-D68B-4430-8128-C0C641980278}.Debug|x64.Build.0 = Debug|x64
+		{AD01129E-D68B-4430-8128-C0C641980278}.Debug|x86.ActiveCfg = Debug|Win32
+		{AD01129E-D68B-4430-8128-C0C641980278}.Debug|x86.Build.0 = Debug|Win32
+		{AD01129E-D68B-4430-8128-C0C641980278}.Release|x64.ActiveCfg = Release|x64
+		{AD01129E-D68B-4430-8128-C0C641980278}.Release|x64.Build.0 = Release|x64
+		{AD01129E-D68B-4430-8128-C0C641980278}.Release|x86.ActiveCfg = Release|Win32
+		{AD01129E-D68B-4430-8128-C0C641980278}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

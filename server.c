@@ -24,6 +24,9 @@ void Renderer();
 bool running = 1;
 int roundTime = 1000;
 bool NeedToSendData = false;
+HINSTANCE bot_file[8];
+int botcount = 0;
+thrd_t bot_thrd[8];
 int condition_exit = 0;
 int line = LINE;
 int column = COLUMN;
@@ -40,11 +43,17 @@ int version = 251129;
 struct sockaddr_in address,broadcast_addr;
 int addrlen;
 int port = PORT;
+char botpath[MAX_PATH];
 SetupData setupdata = { 0 };
 char messageType, currentCMD,game_status;
 char serverName[30];
 SOCKET wait_fd[8];
 Font font;
+BOOL FileExists_New(LPCTSTR szPath) {
+	DWORD dwAttrib = GetFileAttributes(szPath);
+	return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
 void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color);
 void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor);
 Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textColor, Color buttonColor, Color shaderColor) {
@@ -56,7 +65,7 @@ Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textC
 	DrawTextAtCenter(text, x, y, fontsize, textColor);
 	return button;
 }
-extern char* GetBotDLL();
+extern WCHAR* GetBotDLL();
 void SendWait(SOCKET fd) {
 	char wms = SERVER_CMD;
 	char wcmd = WAIT_FOR_END;
@@ -158,6 +167,10 @@ int main(void)
 	thrd_join(thrd_recv, &result);
 	thrd_join(thrd_game_logic, &result);
 	thrd_join(thrd_send, &result);
+	for (int i = 0; i < botcount; i++) {
+		thrd_join(bot_thrd[i],&result);
+		FreeLibrary(bot_file[i]);
+	}
 
 	printf("some client disconnected! Press any key to end game\n(Don't close the terminal window directly)\n");
 
@@ -190,6 +203,27 @@ int send_to_client(void* arg) {
 		char temp_messageType = messageType;
 		char temp_currentCMD = currentCMD;
 		mtx_unlock(&mutex_c);
+		if (temp_messageType == BOT_ADD) {
+			/*strcpy(botpath, "D:/BotExample.dll");
+			if (!FileExists_New(botpath)) {
+				fprintf(stderr, "DLL file does not exist: %s\n", botpath);
+				continue;
+			}*/
+			bot_file[botcount] = LoadLibrary(GetBotDLL());
+			if (bot_file[botcount] == NULL) {
+				DWORD error = GetLastError();
+				fprintf(stderr, "Failed to load DLL %s, error: %lu\n", botpath, error);
+				continue;
+			}
+			void (*bot_function)() = (void(*)())GetProcAddress(bot_file[botcount], "bot_function");
+			if (bot_function == NULL) {
+				DWORD error = GetLastError();
+				fprintf(stderr, "Failed to get function address from %s, error: %lu\n", botpath, error);
+				FreeLibrary(bot_file[botcount]);  // 清理资源
+				continue;
+			}
+			thrd_create(&bot_thrd[botcount++], bot_function, 0);
+		}
 		if (temp_messageType == MAP_DATA) {
 			//缓冲区赋值
 			mtx_lock(&mutex);
@@ -644,8 +678,7 @@ void Renderer() {
 			}
 			Rectangle button_add_bot = DrawButtonAtCenter("Add Bot", screenWidth / 2, inputStartY + 300, 35, BLACK, WHITE, GeneralsGreen);
 			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, button_add_bot)) {
-				char botpath[MAX_PATH];
-				strcpy(botpath, GetBotDLL());
+				SendSignal(BOT_ADD, 0);
 			}
 
 

@@ -39,6 +39,7 @@
 #define SETUP_DATA 1
 #define SERVER_CMD 2
 #define TEST_ALIVE 3
+#define BOT_ADD 4
 //server command type:
 #define GAME_START 0
 #define GAME_LOSE 1

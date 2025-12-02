@@ -5,19 +5,18 @@
 #include <windows.h>
 #include <threads.h>
 
-char* GetBotDLL() {
-    static char dllPath[MAX_PATH] = { 0 };
-    OPENFILENAMEA ofn;
+WCHAR* GetBotDLL() {
+    static WCHAR dllPath[MAX_PATH] = { 0 };
+    OPENFILENAMEW ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = "Gen_in_C Bot Files (*.gbt)\0*.gbt\0";
+    ofn.lpstrFilter = L"Gen_in_C Bot Files (*.dll)\000*.dll\000";
     ofn.lpstrFile = dllPath;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    ofn.lpstrTitle = "选择Bot文件";
-
-    if (GetOpenFileNameA(&ofn)) {
+    ofn.lpstrTitle = L"选择Bot文件";
+    if (GetOpenFileNameW(&ofn)) {
         return dllPath;
     }
     else {
