@@ -49,11 +49,9 @@ char messageType, currentCMD,game_status;
 char serverName[30];
 SOCKET wait_fd[8];
 Font font;
-BOOL FileExists_New(LPCTSTR szPath) {
-	DWORD dwAttrib = GetFileAttributes(szPath);
-	return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
-}
+char bot_cmd[8];
+bool NeedToFreeMap = false;
+
 void DrawTextAtCenter(char* text, int x, int y, int fontsize, Color color);
 void DrawFilledRectangle(int startx, int starty, int width, int height, char* text, int fontsize, Color lineColor, Color fillColor, Color textcolor);
 Rectangle DrawButtonAtCenter(char* text, int x, int y, int fontsize, Color textColor, Color buttonColor, Color shaderColor) {
@@ -158,6 +156,11 @@ int main(void)
 
 	Renderer();
 	printf("sending exit signal\n");
+	for (int i = 0; i < botcount; i++) {
+		bot_cmd[i] = BOT_EXIT;
+	}
+	SendSignal(SERVER_CMD, SERVER_OFF);
+	Sleep(100);
 	// 请求线程退出
 	running = false;
 	cnd_signal(&cond);
@@ -172,14 +175,17 @@ int main(void)
 		FreeLibrary(bot_file[i]);
 	}
 
-	printf("some client disconnected! Press any key to end game\n(Don't close the terminal window directly)\n");
+	//printf("some client disconnected! Press any key to end game\n(Don't close the terminal window directly)\n");
 
 
 	for (int i = 0; i < playercount;i++) closesocket(client_fd[i]);
 	closesocket(listen_fd);
-	for (int i = 0; i < line; i++) free(mapL1[i]);
-	free(mapL1);
-	free(send_buffer);
+	
+	if(NeedToFreeMap){
+		for (int i = 0; i < line; i++) free(mapL1[i]);
+		free(mapL1);
+		free(send_buffer);
+	}
 	mtx_destroy(&mutex);
 	mtx_destroy(&mutex_c);
 	mtx_destroy(&mutex_e);
@@ -199,30 +205,28 @@ int send_to_client(void* arg) {
 		}
 		if (running == 0) { mtx_unlock(&mutex_c); break; }
 		NeedToSendData = 0;
-		printf("try to send %d\n", (int)messageType);
+		//printf("try to send %d\n", (int)messageType);
 		char temp_messageType = messageType;
 		char temp_currentCMD = currentCMD;
 		mtx_unlock(&mutex_c);
 		if (temp_messageType == BOT_ADD) {
-			/*strcpy(botpath, "D:/BotExample.dll");
-			if (!FileExists_New(botpath)) {
-				fprintf(stderr, "DLL file does not exist: %s\n", botpath);
-				continue;
-			}*/
 			bot_file[botcount] = LoadLibrary(GetBotDLL());
 			if (bot_file[botcount] == NULL) {
 				DWORD error = GetLastError();
 				fprintf(stderr, "Failed to load DLL %s, error: %lu\n", botpath, error);
 				continue;
 			}
-			void (*bot_function)() = (void(*)())GetProcAddress(bot_file[botcount], "bot_function");
+			int (*bot_function)(BotData *botdata) = (int(*)(BotData *botdata))GetProcAddress(bot_file[botcount], "bot_function");
 			if (bot_function == NULL) {
 				DWORD error = GetLastError();
 				fprintf(stderr, "Failed to get function address from %s, error: %lu\n", botpath, error);
 				FreeLibrary(bot_file[botcount]);  // 清理资源
 				continue;
 			}
-			thrd_create(&bot_thrd[botcount++], bot_function, 0);
+			BotData botdata;
+			botdata.cmd = &bot_cmd[botcount];
+			botdata.port = port;
+			thrd_create(&bot_thrd[botcount++], bot_function, &botdata);
 		}
 		if (temp_messageType == MAP_DATA) {
 			//缓冲区赋值
@@ -271,6 +275,7 @@ int send_to_client(void* arg) {
 				game_status = READY;
 				srand((unsigned int)time(NULL));
 				int** map = generatemap(line, column, playercount);
+				NeedToFreeMap = true;
 				mapL1 = malloc(line * sizeof(Block*));
 				send_buffer = malloc(line * column * sizeof(Block));
 				for (int i = 0, pc = 1; i < line; i++) {
@@ -307,6 +312,7 @@ int send_to_client(void* arg) {
 				for (int i = 0; i < line; i++) free(mapL1[i]);
 				free(mapL1);
 				free(send_buffer);
+				NeedToFreeMap = false;
 				setupdata.readynum = 0;
 				roundn = 0;
 				for (int i = 0; i < waitcount; i++) {

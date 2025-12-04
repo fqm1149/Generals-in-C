@@ -1,18 +1,27 @@
 #ifndef GENERALS_H
 #define GENERALS
+#ifndef GEN_BOT_DEV
+#include <raylib.h>
 #define WIN32_LEAN_AND_MEAN     
 #define NOGDI                   
 #define NOUSER 
+#else 
+typedef struct Color {
+	unsigned char r;        // Color red value
+	unsigned char g;        // Color green value
+	unsigned char b;        // Color blue value
+	unsigned char a;        // Color alpha value
+} Color;
+#endif
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <raylib.h>
 #pragma comment(lib, "ws2_32.lib")
-#define PORT 8029
+#define PORT 8888
 #define BROADCAST_PORT 8092
-#define DEFAULT_SERVER_PORT 12345
+#define DEFAULT_SERVER_PORT 8888
 
 #define MOUNTAIN -1
 #define CITY 1
@@ -47,10 +56,12 @@
 #define GAME_READY 3
 #define WAIT_FOR_END 4
 #define JOIN 5
+#define SERVER_OFF 6
 //client->server datatype:
 #define UPLOAD_MOVE 0
 #define CLIENT_CMD 1
 #define UPLOAD_NAME 2
+#define UPLOAD_BOTINFO 3
 //client command type:
 #define CLIENT_EXIT 2
 #define CLIENT_READY 1
@@ -69,7 +80,8 @@
 
 //game status of server:1,2,5
 
-
+//server->bot CMD
+#define BOT_EXIT 1
 
 //UI standard
 #define TEXT_SPACING 5
@@ -117,4 +129,9 @@ typedef struct ServerInfo {
 	char name[30];
 	char ip[22];
 }ServerInfo;
+
+typedef struct BotData {
+	int port;
+	char* cmd;
+}BotData;
 #endif

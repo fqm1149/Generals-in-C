@@ -658,6 +658,9 @@ int recv_from_server(void* arg) {
 				break;
 			case SHOW_MAP:
 				game_status = ENDGAME;
+				for (int i = 0; i < line; i++) free(mapL1[i]);
+				free(mapL1);
+				free(mapbuffer);
 				break;
 			case GAME_READY:
 				game_status = READY;
