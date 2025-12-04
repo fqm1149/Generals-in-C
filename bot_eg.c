@@ -11,7 +11,6 @@ StatisticData statisticData;
 SetupData setupdata;
 Block** mapL1;
 Block* mapbuffer;
-char gameReady = 1;
 int line, column;
 int playernum;//自己的编号，从1开始
 char messageType, currentCMD;

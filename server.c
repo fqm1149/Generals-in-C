@@ -22,7 +22,7 @@ int MoveOneStep(Move move);
 void OwnerReplace(int loser, int winner);
 void Renderer();
 bool running = 1;
-int roundTime = 1000;
+int roundTime = 800;
 bool NeedToSendData = false;
 HINSTANCE bot_file[8];
 int botcount = 0;

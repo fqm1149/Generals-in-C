@@ -594,6 +594,9 @@ int Renderer() {
 			Rectangle exitButton = DrawButtonAtCenter("Go Back", width / 2, height / 2 + 50, 35, WHITE, GeneralsGreen, BLACK);
 			if (CheckCollisionPointRec(GetMousePosition(), exitButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 				game_status = WAITING_FOR_START;
+				for (int i = 0; i < line; i++) free(mapL1[i]);
+				free(mapL1);
+				free(mapbuffer);
 			}
 			mtx_unlock(&mutex);
 			EndDrawing();
@@ -658,9 +661,6 @@ int recv_from_server(void* arg) {
 				break;
 			case SHOW_MAP:
 				game_status = ENDGAME;
-				for (int i = 0; i < line; i++) free(mapL1[i]);
-				free(mapL1);
-				free(mapbuffer);
 				break;
 			case GAME_READY:
 				game_status = READY;
