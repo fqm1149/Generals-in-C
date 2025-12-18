@@ -27,6 +27,9 @@ typedef struct Color {
 #define CITY 1
 #define PLAIN 0
 #define CROWN -3
+//num, owner, type¹«ÓÃ
+#define OBSTACLE -2
+
 
 #define MOVEUP 1
 #define MOVEDOWN 2

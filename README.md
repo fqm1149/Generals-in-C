@@ -148,3 +148,8 @@ int my_land = statisticData.land[playernum - 1];
 ## 计划更新
 1. **游玩记录保存**
 2. **Bot VS Bot测试机**
+
+## 开源Bot
+* [Campanula](https://github.com/fqm1149/Campanula/), click [here](https://github.com/fqm1149/Campanula/releases/latest) to download.
+## 友情链接
+Generals C++复刻版本: [Re-Generals](https://github.com/InvernoFrio/Re-Generals) By [InvernoFrio](https://github.com/InvernoFrio/)

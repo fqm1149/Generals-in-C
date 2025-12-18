@@ -481,7 +481,12 @@ int MoveOneStep(Move move) {
 	int initial_type = mapL1[move.startx - 1][move.starty - 1].type;
 	int target_type = mapL1[move.endx - 1][move.endy - 1].type;
 	int target_owner = mapL1[move.endx - 1][move.endy - 1].owner;
-	if (initial_owner != move.launcher || initial_type == MOUNTAIN || target_type == MOUNTAIN) return 1;
+	if (initial_owner != move.launcher) {
+		printf("invalid move!type1\n"); return 1;
+	}
+	if (initial_type == MOUNTAIN || target_type == MOUNTAIN) {
+		printf("invalid move!type2\n"); return 1;
+	}
 	int initial_army = mapL1[move.startx - 1][move.starty - 1].num;
 	mapL1[move.startx - 1][move.starty - 1].num = 1;
 	if (target_owner == move.launcher) mapL1[move.endx - 1][move.endy - 1].num += initial_army - 1;
